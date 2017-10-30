@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+
+<PropertyList>
+
+  <generic>
+    <input>   
+      <line_separator>\n</line_separator>
+      <var_separator>,</var_separator>
+      
+      <chunk>
+        <name>Altitude setpoint</name>
+        <node>/fdm/jsbsim/ap/altitude_setpoint</node>
+        <type>float</type>
+      </chunk>
+
+      <chunk>
+        <name>Heading setpoint</name>
+        <node>/fdm/jsbsim/ap/heading_setpoint</node>
+        <type>float</type>
+      </chunk>
+      
+      <chunk>
+        <name>Velocity setpoint</name>
+        <node>/fdm/jsbsim/ap/velocity_setpoint</node>
+        <type>float</type>
+      </chunk>
+
+      <chunk>
+        <name>Acceleration setpoint</name>
+        <node>/fdm/jsbsim/ap/acceleration_setpoint</node>
+        <type>float</type>
+      </chunk>
+      
+      <chunk>
+        <name>Gamma setpoint</name>
+        <node>/fdm/jsbsim/ap/gamma_setpoint</node>
+        <type>float</type>
+      </chunk>
+
+    </input>
+  </generic>
+
+</PropertyList>

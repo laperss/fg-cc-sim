@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PropertyList>
+ <generic>
+  <output>
+   <line_separator>newline</line_separator>
+   <var_separator>tab</var_separator>
+
+   <chunk>
+    <name>Time</name>
+    <node>/position/timetoday</node>
+    <type>float</type>
+    <format>%.10f</format>
+   </chunk>
+
+   <chunk>
+    <name>/fdm/jsbsim/velocities/vg-fps</name>
+    <node>/fdm/jsbsim/velocities/vg-fps</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+
+   <chunk>
+    <name>/fdm/jsbsim/velocities/vt-fps</name>
+    <node>/fdm/jsbsim/velocities/vt-fps</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+
+
+   <chunk>
+    <name>/fdm/jsbsim/accelerations/udot-ft_sec2</name>
+    <node>/fdm/jsbsim/accelerations/udot-ft_sec2</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+   
+   <chunk>
+    <name>/fdm/jsbsim/attitude/psi-deg</name>
+    <node>/fdm/jsbsim/attitude/psi-deg</node>
+    <type>float</type>
+    <format>%03.4f</format>
+   </chunk>
+
+   <chunk>
+    <name>/fdm/jsbsim/attitude/psi-rad</name>
+    <node>/fdm/jsbsim/flight-path/psi-gt-rad</node>
+    <type>float</type>
+    <format>%03.4f</format>
+   </chunk>
+
+   <chunk>
+    <name>/fdm/jsbsim/position/h-agl-ft</name>
+    <node>/fdm/jsbsim/position/h-agl-ft</node>
+    <type>float</type>
+    <format>%03.4f</format>
+   </chunk>
+
+   <chunk>
+    <name>/fdm/jsbsim/position/lat-gc-deg</name>
+    <node>/fdm/jsbsim/position/lat-gc-deg</node>
+    <type>float</type>
+    <format>%03.10f</format>
+   </chunk>
+
+   <chunk>
+    <name>/fdm/jsbsim/position/long-gc-deg</name>
+    <node>/fdm/jsbsim/position/long-gc-deg</node>
+    <type>float</type>
+    <format>%03.5f</format>
+   </chunk>
+
+   <chunk>
+    <name>posx</name>
+    <node>/position/posx</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+
+   <chunk>
+    <name>posy</name>
+    <node>/position/posy</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+   
+  </output>
+ </generic>
+</PropertyList>
