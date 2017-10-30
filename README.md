@@ -11,3 +11,6 @@ This is the software required to run the simulations. In bracket is the version 
 * [FlightGear](http://www.flightgear.org/download/) [v2017.2.1]
 * [JSBSim](https://sourceforge.net/projects/jsbsim/) [v1.0]
 * Python 3 [3.6]
+
+Some optional packages
+* [PyQT](https://wiki.python.org/moin/PyQt) and [PyQTgraph](http://www.pyqtgraph.org/) for plotting and GUI
