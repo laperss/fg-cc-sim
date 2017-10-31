@@ -1,16 +1,17 @@
 #! /usr/bin/python
-""" Control and sending commands between Python and JSBSim over TCP.
+""" Send commands between Python and JSBSim over TCP.
 
 Author: Linnea Persson, laperss@kth.se 
 
 Suitable for sending many commands in a stream.
+It is mainly used to update the reference values for the vehicles. 
+
 Usage:
     uav_socket = control.fgsocket.UAV(5515, 5514)
     ugv_socket = control.fgsocket.UGV(5526, 5525)
 Set the reference values to send:
     uav_socket.setpoint['acceleration'] = 0.3
     ugv_socket.setpoint['heading'] = 12
-
 """
 from __future__ import print_function
 import thread
