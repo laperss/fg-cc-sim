@@ -14,3 +14,6 @@ This is the software required to run the simulations. In bracket is the version 
 
 Some optional packages
 * [PyQT](https://wiki.python.org/moin/PyQt) and [PyQTgraph](http://www.pyqtgraph.org/) for plotting and GUI
+
+#### FlightGear Multiplay
+In order for the vehicle simulations to be displayed together, FlightGear multiplay mode is used. There is a delay in the transmission of data between the instances, causing lag in the visualization. To better this, enable multiplayer lag correction in FlighGear: Multiplayer -> Lag Settings. 
