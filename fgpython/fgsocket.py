@@ -5,46 +5,57 @@ Author: Linnea Persson, laperss@kth.se
 
 Suitable for sending many commands in a stream.
 It is mainly used to update the reference values for the vehicles. 
+You must set the heading with which you define the heading relative to.
 
 Usage:
-    uav_socket = control.fgsocket.UAV(5515, 5514)
-    ugv_socket = control.fgsocket.UGV(5526, 5525)
+    FGSocketConnection.heading = HEADING
+    uav_socket = FGSocketConnection(5515, 5514)
+    ugv_socket = FGSocketConnection(5526, 5525)
 Set the reference values to send:
     uav_socket.setpoint['acceleration'] = 0.3
     ugv_socket.setpoint['heading'] = 12
 """
 from __future__ import print_function
+import math
 import thread
 import socket
 import re
-import math
 
-HEADING = 199.67
 RAD2DEG = 57.2957795
 DEG2RAD = 0.0174532925
 FEET2M = 0.3048
 M2FEET = 3.28084
 
-class Vehicle(object):
-    """ Base class for JSBSim controller. """
-    setpoint = {'altitude': 15, 'velocity': 25, 'heading': 0, 'acceleration': 0}
-    hold = {'altitude': 1, 'velocity': 1, 'heading': 1, 'attitude': 0, 'acceleration': 0, 'gamma':0}
-    heading = HEADING
-    pause = 0
-    reset = 0
-    data = []
-    def __init__(self, input_port, output_port):
-        self.output_port = output_port
+class FGSocketConnection(object):
+    """ JSBSim communication system. 
+        Uses UDP to reieve data from and send data to FlightGear.
 
+        The protocols for receiving data are defined in:
+            * flightgear/protocols/UAVProtocol.xml
+            * flightgear/protocols/UAVProtocol.xml
+        The protocol for sending data is: 
+            * flightgear/protocols/InputProtocol.xml
+    """
+    heading = 199.67
+    def __init__(self, input_port, output_port, in_protocol='InProtocol', out_protocol='OutProtocol'):
+        self.data = []
+        self.setpoint = {'altitude': 0, 'velocity': 20, 'heading': 0, 'acceleration': 0, 'gamma':0}
+        self.output_port = output_port
+        self.input_port = input_port
+        self.input_protocol = in_protocol
+        self.output_protocol = out_protocol
+        self.update = False
+        self.setup_sockets()
+
+    def setup_sockets(self):
+        """ Setup the socket communication """
         self.socket_in = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket_out = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         self.socket_in.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket_out.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        self.socket_in.bind(('localhost', input_port))
-        self.update = True
-
+        self.socket_in.bind(('localhost', self.input_port))
 
     def send_command_udp(self, command, port):
         """ Send actuator commands to JSBSim/FlightGear via UDP. """
@@ -54,60 +65,30 @@ class Vehicle(object):
         message = '%s%s\n' %(message, str(command[-1]))
         self.socket_out.sendto(message, ('localhost', port))
 
-
-    def get_state(self, idx):
-        """ Return the current vehicle state """
-        return [self.data[i] for i in idx]
-
-    def start_update_state(self):
+    def start_receive_state(self):
+        """ Starts the thread for reading data from flightGear """ 
         self.update = True
-        thread.start_new_thread(self.update_state,())
+        thread.start_new_thread(self.receive_state,())
 
-    def update_state(self):
+    def receive_state(self):
+        """ Separates data and updates the "data" variable"""
         while self.update == True:
             data, addr = self.socket_in.recvfrom(2048)
             data.rstrip('\n')
             if not data: break
             self.data = [float(i) for i in re.split(r'\t+', data)]
-##################################################################################
 
-
-class UAV(Vehicle):
-    setpoint = {'altitude': 20, 'velocity': 23, 'heading': 0, 'acceleration': 0, 'gamma':0}
-    hold = {'altitude': 1, 'velocity': 1, 'heading': 1, 'attitude': 0, 'acceleration': 0, 'gamma':0}
-
-    """ Control signals to and from a JSBSim UAV"""
-    def __init__(self, input_port, output_port):
-        Vehicle.__init__(self, input_port, output_port)
+    def get_state(self, idx):
+        """ Return the current vehicle state """
+        return [self.data[i] for i in idx]
 
     def send_cmd(self):
         """ Define the message and send to UDP function. """
-        command = [self.setpoint['altitude']*3.28084,
-                   (self.setpoint['heading'] + HEADING)*DEG2RAD,
-                   self.setpoint['velocity']*3.28084,
-                   self.setpoint['acceleration']*3.28084,
+        command = [self.setpoint['altitude']*M2FEET,
+                   math.radians(self.setpoint['heading'] + self.heading),
+                   self.setpoint['velocity']*M2FEET,
+                   self.setpoint['acceleration']*M2FEET,
                    math.radians(self.setpoint['gamma'])]
-        self.send_command_udp(command, self.output_port)
-
-
-
-##################################################################################
-
-
-class UGV(Vehicle):
-    setpoint = {'velocity': 23, 'heading': 0, 'acceleration': 0}
-    hold = {'velocity': 1, 'heading': 1, 'acceleration': 0}
-    """ Control signals to and from a JSBSim UGV"""
-    def __init__(self, input_port, output_port):
-        Vehicle.__init__(self, input_port, output_port)
-
-    def send_cmd(self):
-        """ Define the message and send to UDP function. """
-        command = [0.0,
-                  (self.setpoint['heading'] + HEADING)*DEG2RAD,
-                   self.setpoint['velocity']*3.28084,
-                   self.setpoint['acceleration']*3.28084,
-                   0]
         self.send_command_udp(command, self.output_port)
 
 

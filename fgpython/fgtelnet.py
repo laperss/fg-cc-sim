@@ -1,22 +1,23 @@
 #! /usr/bin/python
-""" Send commands from Python to FlightGear over telnet. 
+""" Send commands from Python to FlightGear over Telnet. 
 
 Author: Linnea Persson, laperss@kth.se 
 
 This is suitable for sending individual commands.
+
 Usage:
-    uav_ = fgtelnet.FlightGearVehicle('localhost', 6500)
-    ugv_ = fgtelnet.FlightGearVehicle('localhost', 6600)
+    uav_tnet = fgtnet.FlightGearVehicle('localhost', 6500)
+    ugv_tnet = fgtnet.FlightGearVehicle('localhost', 6600)
 Send some commands:
-    uav_.landing_mode()
-    uav_.pause()
+    uav_tnet.landing_mode()
+    uav_tnet.pause()
 
 """
 from __future__ import print_function
-from telnetlib import Telnet
+import time
 import socket
 from string import split
-import time
+from telnetlib import Telnet
 
 def is_number(string):
     """ Return true if the string is a number """
@@ -99,7 +100,6 @@ class FGTelnet(Telnet):
     def set(self, prop, value):
         """Set FlightGear property to value """
         self._put('set %s %s' % (prop, value))
-        #self._get()
 
     def _put(self, cmd):
         """ Send command to telnet """
@@ -111,11 +111,8 @@ class FGTelnet(Telnet):
         resp = Telnet.read_until(self, '\n', self.timeout)
         return resp
 
-
-class FlightGearVehicle:
+class FGTelnetConnection:
     """Interface for sending commands from Python to FlightGear """
-    setpoint = {'altitude': 15, 'velocity': 25, 'heading': 0, 'acceleration': 0}
-    hold = {'altitude': 1, 'velocity': 1, 'heading': 1, 'attitude': 0, 'acceleration': 0, 'gamma':0}
     telnet = False
 
     def __init__(self, host='localhost', port=5500):
