@@ -1,50 +1,79 @@
 #! /usr/bin/python
 """ 
-Visualising data from JSBSim. The script reads the files indicated by UAV_FILE and UGV_FILE and lets you plot the data. The plotting works at runtime.  
-Linnea Persson 2017
-laperss@kth.se
+Visualising data from JSBSim. 
+
+Author: Linnea Persson, laperss@kth.se 
+
+The script reads the files indicated by UAV_FILE and UGV_FILE and lets you plot the data. 
+The plotting works at runtime.  
+
 """
 from __future__ import print_function
 import sys
-import subprocess
-import time
 import os
-import pandas as pd
+import pickle
 from PyQt4 import QtCore, QtGui
 import pyqtgraph.exporters
 import pyqtgraph as pg
+from PyQt4 import QtGui, QtCore
+import pandas as pd
 
 TITLE = 'Data Visualization'
 UPDATE_FREQ = 10
-PATH = os.path.dirname(os.path.abspath(__file__))
-UAV_FILE = './logs/uav.csv'
-UGV_FILE = './logs/ugv.csv'
-COLORS = ['y', 'm', 'c', 'r', 'b', 'g', 'w','y', 'm', 'c', 'r', 'b', 'g', 'w']
+FEET2M = 0.3048
 
-# MAIN WINDOW
+PATH = os.path.dirname(os.path.abspath(__file__))
+UAV_FILE = './logs/Rascal.csv'
+USV_FILE = './logs/USV.csv'
+UGV_FILE = './logs/ground-vehilce.csv'
+
+# MAIN PROGRAM
 #---------------------------------------------------------------------------------
 class VisualizationGraph(QtGui.QWidget):
     """ Base GUI class for visualising JSBSim/FlightGear landing. """
 
+    colors = ['y', 'm', 'c', 'r', 'b', 'g', 'w','y', 'm', 'c', 'r', 'b', 'g', 'w']
     color_it = 0
     styles = [QtCore.Qt.SolidLine, QtCore.Qt.DashLine, QtCore.Qt.DashDotLine]
-    time = 0
-    sliding_window_time = 30
-    m = 2
-    n = 2
-    ugv_modtime = 0
-    uav_modtime = 0
-    uav_lines = []
-    ugv_lines = []
+    lines_mpc = dict()
 
-    def __init__(self):
+    def __init__(self, vehicles):
         QtGui.QWidget.__init__(self)
+        self.vehicles = []
+        for v in vehicles: 
+            vehicle = {'lines':[], 'prop':[], 'modtime':0}
+            vehicle['name'] = v[0]
+            vehicle['file'] = v[1]
+            self.vehicles.append(vehicle)
         self.setGeometry(0, 53, 1300, 700)
         self.main_layout = QtGui.QGridLayout(self)
         self.create_graph()
         self.timer = pg.QtCore.QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(UPDATE_FREQ)
+
+        self.loadData()
+    def closeEvent(self, event):
+        """ Close the window and end process. """
+        vehicles = dict()
+        for vehicle in self.vehicles:
+            lines = [line.name() for line in vehicle['lines']]
+            vehicles[vehicle['name']] = lines
+        pickle.dump(vehicles, open("save.p", "wb" ))
+        event.accept() 
+
+    def loadData(self):
+        """ Load saved data from pickle """
+        try:
+            lines = pickle.load(open("save.p", "rb" ))
+            for vehicle in self.vehicles:
+                for line in lines[vehicle['name']]:
+                    try:
+                        self.add_plot(vehicle, line)
+                    except:
+                        pass
+        except EOFError:
+            pass
 
     def create_graph(self):
         """ Create the graph canvas """
@@ -53,49 +82,38 @@ class VisualizationGraph(QtGui.QWidget):
         self.graph = pg.PlotItem()
         self.graph.showGrid(True, True)
         self.graph.setLabel('bottom', 'Time [s]')
-        self.graph.setTitle(TITLE)
+        self.graph.setTitle('FlightGear simulation data')
         self.graph.setLimits(**{'xMin':0, 'minYRange':0.1})
         self.graph.addLegend(size=(20, 20), offset=(10, 10))
         self.graphics_layout.addItem(self.graph)
-
         menu = self.create_graph_selection_boxes()
         self.create_side_menu()
         self.main_layout.addWidget(self.graphics_layout, 0, 0, 4, 3)
-        self.main_layout.addLayout(menu, 5, 0, 1, 3)
+        self.main_layout.addLayout(menu, 5, 0, 1, 2)
 
 
     def create_graph_selection_boxes(self):
         """ Create boxes for selecting data to show """
-        if os.path.isfile(UAV_FILE):
-            data = pd.read_csv(UAV_FILE)
-            self.uav_headers = list(data)
-            self.uav_file_exists = True
-
-        if os.path.isfile(UGV_FILE):
-            if self.ugv_modtime < os.stat(UGV_FILE)[8]:
-                data = pd.read_csv(UGV_FILE)
-                self.ugv_headers = list(data)
-                self.ugv_file_exists = True
-
         drop_down_layout = QtGui.QGridLayout()
 
-        self.scroll_box_uav = QtGui.QComboBox()
-        self.scroll_box_ugv = QtGui.QComboBox()
-        for item in self.ugv_headers[1:]:
-            self.scroll_box_ugv.addItem('/ugv/'+item[12:])
-        for item in self.uav_headers[1:]:
-            self.scroll_box_uav.addItem('/uav/'+item[12:])
+        for vehicle in self.vehicles:
+            vehicle['scroller'] = QtGui.QComboBox()
 
-        add_uav_btn = QtGui.QPushButton("Add")
-        add_uav_btn.clicked.connect(self.add_uav_plot)
-        add_ugv_btn = QtGui.QPushButton("Add")
-        add_ugv_btn.clicked.connect(self.add_ugv_plot)
-        drop_down_layout.addWidget(self.scroll_box_uav, 0, 0, 1, 1)
-        drop_down_layout.addWidget(self.scroll_box_ugv, 1, 0, 1, 1)
-        drop_down_layout.addWidget(add_uav_btn, 0, 1, 1, 1)
-        drop_down_layout.addWidget(add_ugv_btn, 1, 1, 1, 1)
+        self.update_headers()
+        i = 1
+        for vehicle in self.vehicles:
+            drop_down_layout.addWidget(vehicle['scroller'], i, 0, 1, 3)
+            add_btn = QtGui.QPushButton("Add") 
+            add_btn.clicked.connect(lambda arg, v=vehicle: self.add_plot_callback(v))
+            drop_down_layout.addWidget(add_btn, i, 3, 1, 1)
+            i += 1
 
-        self.graph_menu_items = [self.scroll_box_uav,self.scroll_box_ugv,add_uav_btn,add_ugv_btn]
+        update_btn = QtGui.QPushButton("Update")
+        update_btn.clicked.connect(self.update_headers)
+        drop_down_layout.addWidget(update_btn, 1, 4, 1, 1)
+        update_btn = QtGui.QPushButton("Clear")
+        update_btn.clicked.connect(self.clear_headers)
+        drop_down_layout.addWidget(update_btn, 2, 4, 1, 1)
         return drop_down_layout
 
     def create_side_menu(self):
@@ -110,90 +128,105 @@ class VisualizationGraph(QtGui.QWidget):
             self.side_layout.itemAt(i).widget().setParent(None)
 
         self.side_layout.addWidget(QtGui.QLabel('Plotted Lines: '), 0, 0, 1, 1)
-        self.side_layout.addWidget(QtGui.QLabel('UAV'), 1, 0, 1, 1)
-        for i in range(len(self.uav_lines)):
-            line = self.uav_lines[i]
-            button = QtGui.QToolButton()
-            button.setText('Delete')
-            button.setObjectName(line.name())
-            button.released.connect(self.delete_line)
-            self.side_layout.addWidget(QtGui.QLabel(line.name()), i + 2, 0, 1, 1)
-            self.side_layout.addWidget(button, i + 2, 1, 1, 1)
-        k = len(self.uav_lines) + 2
-        self.side_layout.addWidget(QtGui.QLabel('UGV'),  k + 1, 0, 1, 1)
-        for i in range(len(self.ugv_lines)):
-            line = self.ugv_lines[i]
-            button = QtGui.QToolButton()
-            button.setText('Delete')
-            button.setObjectName(line.name())
-            button.released.connect(self.delete_line)
-            self.side_layout.addWidget(QtGui.QLabel(line.name()), k + i + 2, 0, 1, 1)
-            self.side_layout.addWidget(button, k + i + 2, 1, 1, 1)
+
+        k = 0
+        for vehicle in self.vehicles:
+            text = QtGui.QLabel('%s\n' %vehicle['name'])
+            text.setAlignment(QtCore.Qt.AlignCenter)
+            text.setStyleSheet('font-weight: 500;text-decoration:underline;')
+            self.side_layout.addWidget(text, 1 + k, 0, 1, 1)
+            i = 1
+            for line in vehicle['lines']:
+                button = QtGui.QToolButton()
+                button.setText('Delete')
+                button.setObjectName(line.name())
+                button.released.connect(self.delete_line)
+                self.side_layout.addWidget(QtGui.QLabel(line.name()), k + i + 2, 0, 1, 1)
+                self.side_layout.addWidget(button, k + i + 2, 1, 1, 1)
+                i += 1
+            k = k + i + 2
+
+    def update_headers(self):
+        """ Get the headers of the vehicle CSV data files """
+        for vehicle in self.vehicles:
+            if os.path.isfile(vehicle['file']):
+                data = pd.read_csv(vehicle['file'])
+                vehicle['headers'] = list(data)
+
+        for vehicle in self.vehicles:
+            vehicle['scroller'].clear()
+            for item in vehicle['headers'][1:]:
+                vehicle['scroller'].addItem('/'+ vehicle['name']+'/'+item[12:])
+
+    def clear_headers(self):
+        """ Clear the plots of all headers """
+        for vehicle in self.vehicles:
+            for line in vehicle['lines']:
+                self.graph.removeItem(line)
+                vehicle['modtime'] = 0
+                self.graph.legend.removeItem(line.name())
+            vehicle['lines'] = []
+        self.update_side_menu()
 
     def delete_line(self):
         """ Delete one of the lines to plot """
-        sending_button = self.sender()
-        name = sending_button.objectName()
-        print(sending_button.objectName())
-        if name[1:4] == 'uav':
-            for line in self.uav_lines:
-                if line.name() == name:
-                    self.uav_lines.remove(line)
-                    self.graph.removeItem(line)
-                    break
-            self.uav_modtime = 0
-        elif name[1:4] == 'ugv':
-            for line in self.ugv_lines:
-                if line.name() == name:
-                    self.ugv_lines.remove(line)
-                    self.graph.removeItem(line)
-                    break
-            self.ugv_modtime = 0
+        name = self.sender().objectName()
+
+        for vehicle in self.vehicles:
+            if name in [v.name() for v in vehicle['lines']]:
+                line, = [l for l in vehicle['lines'] if l.name() == name]
+                vehicle['lines'].remove(line)
+                self.graph.removeItem(line)
+                vehicle['modtime'] = 0
+                break
+
         self.graph.legend.removeItem(line.name())
         self.update_side_menu()
 
-    def add_uav_plot(self):
+    def add_plot_callback(self, vehicle):
         """ Add another variable to plot """
-        c = COLORS[self.color_it]
-        text = str(self.scroll_box_uav.currentText())
-        if text not in [line.name() for line in self.uav_lines]: 
-            line = (pg.PlotDataItem(x=[], y=[], name=text, pen=pg.mkPen(color=c, width=1.7)))
+        c = self.colors[self.color_it]
+        text = str(vehicle['scroller'].currentText())
+        if text not in [line.name() for line in vehicle['lines']]:
+            vehicle['prop'].append(text)
+            line = (pg.PlotDataItem(x=[], y=[], name=text,pen=pg.mkPen(color=c, width=1.7)))
             line.dataName = '/fdm/jsbsim/'+text[5:]
-            if ("-rad" in text or "gamma" in text or "theta" or "heading" in text):
-                line.scale = 180/3.1415
-            self.uav_lines.append(line)
+            vehicle['lines'].append(line)
             self.graph.addItem(line)
-            self.uav_modtime = 0
+            vehicle['modtime'] = 0
         self.color_it += 1
         self.update_side_menu()
 
-    def add_ugv_plot(self):
+    def add_plot(self, vehicle, linename):
         """ Add another variable to plot """
-        c = COLORS[self.color_it]
-        text = str(self.scroll_box_ugv.currentText())
-        if text not in [line.name() for line in self.ugv_lines]: 
-            line = (pg.PlotDataItem(x=[], y=[], name=text,pen=pg.mkPen(color=c, width=1.7)))
-            line.dataName = '/fdm/jsbsim/'+text[5:]
-            if ("-rad" in text or "gamma" in text or "theta" or "heading" in text):
-                line.scale = 180/3.1415
-            self.ugv_lines.append(line)
+        c = self.colors[self.color_it]
+        if linename not in [line.name() for line in vehicle['lines']]:
+            vehicle['prop'].append(linename)
+            line = (pg.PlotDataItem(x=[], y=[], name=linename,pen=pg.mkPen(color=c, width=1.7)))
+            line.dataName = '/fdm/jsbsim/'+linename[5:]
+            vehicle['lines'].append(line)
             self.graph.addItem(line)
-            self.ugv_modtime = 0
+            vehicle['modtime'] = 0
         self.color_it += 1
         self.update_side_menu()
+
+    def plot(self, x, y, prop, c='r'):
+        if prop not in self.lines_mpc.keys():
+            line = (pg.PlotDataItem(x=x, y=y, name=prop, dataName=prop,pen=pg.mkPen(color=c, width=1.7)))
+            self.graph.addItem(line)
+            self.lines_mpc[prop] = line
+            line.setData(x, y)
+        else:
+            self.lines_mpc[prop].setData(x, y)
 
     def update_plot(self):
         """ Calls the update_data() function if there has been
             any changes to the log files """
-        if os.path.isfile(UAV_FILE):
-            if self.uav_modtime < os.stat(UAV_FILE)[8]:
-                self.update_data_file(UAV_FILE)
-                self.uav_modtime = os.stat(UAV_FILE)[8]
-
-        if os.path.isfile(UGV_FILE):
-            if self.ugv_modtime < os.stat(UGV_FILE)[8]:
-                self.update_data_file(UGV_FILE)
-                self.ugv_modtime = os.stat(UGV_FILE)[8]
+        for vehicle in self.vehicles:
+            if os.path.isfile(vehicle['file']):
+                if vehicle['modtime'] < os.stat(vehicle['file'])[8]:
+                    self.update_data_file(vehicle['file'])
+                    vehicle['modtime'] = os.stat(vehicle['file'])[8]
 
     def update_data_file(self, path):
         """ Read the updated data from a csv file. """
@@ -202,28 +235,19 @@ class VisualizationGraph(QtGui.QWidget):
         idx_0 = max(0, len(data)-2500)
         data = data[idx_0:idx_1]
 
-        if 'Rascal' in path:
-            for line in self.uav_lines:
-                xdata = data['Time'].ravel()
-                try:
-                    ydata = data[line.dataName].ravel()*line.scale
-                except:
-                    ydata = data[line.dataName].ravel()
-                line.setData(xdata, ydata)
-            self.uav_data = data
-        elif 'followme' in path:
-            for line in self.ugv_lines:
-                xdata = data['Time'].ravel()
-                try:
-                    ydata = data[line.dataName].ravel()*line.scale
-                except:
-                    ydata = data[line.dataName].ravel()
-                line.setData(xdata, ydata)
-            self.ugv_data = data
+        for vehicle in self.vehicles:
+            if path == vehicle['file']:
+                for line in vehicle['lines']:
+                    xdata = data['Time'].ravel()
+                    try:
+                        ydata = data[line.dataName].ravel()
+                    except:
+                        ydata = data[line.dataName].ravel()
+                    line.setData(xdata, ydata)
 
 
 app = QtGui.QApplication(sys.argv)
-gui = VisualizationGraph()
+gui = VisualizationGraph([['UAV', UAV_FILE], ['USV', USV_FILE]])
 gui.show()
 app.exec_()
 
