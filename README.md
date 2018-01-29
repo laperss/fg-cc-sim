@@ -6,6 +6,13 @@ This repository shows how to implement an experimental setup environment for tes
   <img width="430" height="300" src="https://people.kth.se/~laperss/assets/images/fg_landing.png">
 </p>
 
+## Dataplotter
+The script ```fgpython/datamonitor.py``` is used to show the live data being written in the files found in the "logs" folder. 
+
+<p align="center">
+  <img width="430" height="300" src="https://user-images.githubusercontent.com/4593893/35514445-7a4a3cfa-0506-11e8-9f02-c4f4b5aa938a.png">
+</p>
+
 
 ## Requirements
 ### Hardware
