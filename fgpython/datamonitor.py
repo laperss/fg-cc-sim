@@ -12,6 +12,7 @@ from __future__ import print_function
 import sys
 import os
 import pickle
+import time
 from PyQt4 import QtCore, QtGui
 import pyqtgraph.exporters
 import pyqtgraph as pg
@@ -48,6 +49,7 @@ class VisualizationGraph(QtGui.QWidget):
         self.setGeometry(0, 53, 1300, 700)
         self.main_layout = QtGui.QGridLayout(self)
         self.create_graph()
+        self.init_time = time.time()
         self.timer = pg.QtCore.QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(UPDATE_FREQ)
@@ -232,13 +234,14 @@ class VisualizationGraph(QtGui.QWidget):
         """ Read the updated data from a csv file. """
         data = pd.read_csv(path)
         idx_1 = len(data)
-        idx_0 = max(0, len(data)-2500)
+        idx_0 = max(0, len(data)-2000)
         data = data[idx_0:idx_1]
+        xdata = data['Time'].ravel()
 
         for vehicle in self.vehicles:
             if path == vehicle['file']:
+                xdata = xdata + (vehicle['modtime'] - self.init_time - xdata[-1])
                 for line in vehicle['lines']:
-                    xdata = data['Time'].ravel()
                     try:
                         ydata = data[line.dataName].ravel()
                     except:
