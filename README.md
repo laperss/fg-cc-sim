@@ -1,11 +1,22 @@
 # FlightGear cooperative control simulations
 This repository shows how to implement an experimental setup environment for testing cooperative maneuvers in FlightGear. 
 
-![Cooperative landing in FlightGear](https://people.kth.se/~laperss/assets/images/fg_landing.png)
+<p align="center">
+  <img width="430" height="300" src="https://user-images.githubusercontent.com/4593893/35376014-867d72a4-01a9-11e8-8340-c74e458e684c.png">
+  <img width="430" height="300" src="https://people.kth.se/~laperss/assets/images/fg_landing.png">
+</p>
+
+## Dataplotter
+The script ```fgpython/datamonitor.py``` is used to show the live data being written in the files found in the "logs" folder. 
+
+<p align="center">
+  <img width="500" height="300" src="https://user-images.githubusercontent.com/4593893/35514445-7a4a3cfa-0506-11e8-9f02-c4f4b5aa938a.png">
+</p>
+
 
 ## Requirements
 ### Hardware
-I ran the simulations on a Intel Core i7 CPU 3.40 GHz x 8 stationary computer running Ubuntu 16.04.
+The simulations were run on a Intel Core i7 CPU 3.40 GHz x 8 stationary computer running Ubuntu 16.04.
 ### Software
 This is the software required to run the simulations. In bracket is the version it has been tested with.
 * [FlightGear](http://www.flightgear.org/download/) [v2017.2.1]
