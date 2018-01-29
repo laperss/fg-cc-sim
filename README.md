@@ -1,7 +1,11 @@
 # FlightGear cooperative control simulations
 This repository shows how to implement an experimental setup environment for testing cooperative maneuvers in FlightGear. 
 
-![Cooperative landing in FlightGear](https://people.kth.se/~laperss/assets/images/fg_landing.png)
+<p align="center">
+  <img width="430" height="300" src="https://user-images.githubusercontent.com/4593893/35376014-867d72a4-01a9-11e8-8340-c74e458e684c.png">
+  <img width="430" height="300" src="https://people.kth.se/~laperss/assets/images/fg_landing.png">
+</p>
+
 
 ## Requirements
 ### Hardware
