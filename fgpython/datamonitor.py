@@ -35,6 +35,7 @@ class VisualizationGraph(QtGui.QWidget):
 
     colors = ['y', 'm', 'c', 'r', 'b', 'g', 'w','y', 'm', 'c', 'r', 'b', 'g', 'w']
     color_it = 0
+    style_it = 0
     styles = [QtCore.Qt.SolidLine, QtCore.Qt.DashLine, QtCore.Qt.DashDotLine]
     lines_mpc = dict()
 
@@ -188,30 +189,38 @@ class VisualizationGraph(QtGui.QWidget):
     def add_plot_callback(self, vehicle):
         """ Add another variable to plot """
         c = self.colors[self.color_it]
+        s = self.styles[self.style_it]
         text = str(vehicle['scroller'].currentText())
         if text not in [line.name() for line in vehicle['lines']]:
             vehicle['prop'].append(text)
-            line = (pg.PlotDataItem(x=[], y=[], name=text,pen=pg.mkPen(color=c, width=1.7)))
+            line = (pg.PlotDataItem(x=[], y=[], name=text,pen=pg.mkPen(color=c, style=s,width=1.7)))
             line.dataName = '/fdm/jsbsim/'+text[5:]
             vehicle['lines'].append(line)
             self.graph.addItem(line)
             vehicle['modtime'] = 0
         self.color_it += 1
+        if (self.color_it%8 == 0):
+            self.style_it += 1
         self.update_side_menu()
 
     def add_plot(self, vehicle, linename):
         """ Add another variable to plot """
         c = self.colors[self.color_it]
+        s = self.styles[self.style_it]
         if linename not in [line.name() for line in vehicle['lines']]:
             vehicle['prop'].append(linename)
-            line = (pg.PlotDataItem(x=[], y=[], name=linename,pen=pg.mkPen(color=c, width=1.7)))
+            line = (pg.PlotDataItem(x=[], y=[], name=linename,pen=pg.mkPen(color=c, 
+                                                                           style=s,width=1.7)))
             line.dataName = '/fdm/jsbsim/'+linename[5:]
             vehicle['lines'].append(line)
             self.graph.addItem(line)
             vehicle['modtime'] = 0
-        self.color_it += 1
-        self.update_side_menu()
 
+        self.color_it += 1
+        if (self.color_it%8 == 0):
+            self.style_it += 1
+
+        self.update_side_menu()
     def plot(self, x, y, prop, c='r'):
         if prop not in self.lines_mpc.keys():
             line = (pg.PlotDataItem(x=x, y=y, name=prop, dataName=prop,pen=pg.mkPen(color=c, width=1.7)))
@@ -234,13 +243,16 @@ class VisualizationGraph(QtGui.QWidget):
         """ Read the updated data from a csv file. """
         data = pd.read_csv(path)
         idx_1 = len(data)
-        idx_0 = max(0, len(data)-2000)
+        idx_0 = max(0, len(data)-6000)
         data = data[idx_0:idx_1]
         xdata = data['Time'].ravel()
 
         for vehicle in self.vehicles:
             if path == vehicle['file']:
-                xdata = xdata + (vehicle['modtime'] - self.init_time - xdata[-1])
+                if (vehicle['modtime'] - self.init_time) > 0:
+                    xdata = xdata + (vehicle['modtime'] - self.init_time - xdata[-1])
+                else:
+                    xdata = xdata
                 for line in vehicle['lines']:
                     try:
                         ydata = data[line.dataName].ravel()
