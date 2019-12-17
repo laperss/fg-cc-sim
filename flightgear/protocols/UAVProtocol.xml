@@ -5,6 +5,7 @@
    <line_separator>newline</line_separator>
    <var_separator>tab</var_separator>
 
+   <!-- 0: Time -->   
    <chunk>
     <name>Time</name>
     <node>/position/timetoday</node>
@@ -12,6 +13,32 @@
     <format>%.10f</format>
    </chunk>
 
+   <!-- 1: x position -->
+   <chunk>
+    <name>posx</name>
+    <node>/fdm/jsbsim/positioning/posx</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+
+   <!-- 1: y position -->
+   <chunk>
+    <name>posy</name>
+    <node>/fdm/jsbsim/positioning/posy</node>
+    <type>float</type>
+    <format>%03.3f</format>
+   </chunk>
+
+   <!-- 3: altitude (ft)-->
+
+   <chunk>
+    <name>/fdm/jsbsim/position/h-agl-ft</name>
+    <node>/fdm/jsbsim/position/h-agl-ft</node>
+    <type>float</type>
+    <format>%03.4f</format>
+   </chunk>
+
+   <!-- 4: true airspeed -->
    <chunk>
     <name>vt-fps</name>
     <node>/fdm/jsbsim/velocities/vt-fps</node>
@@ -19,6 +46,7 @@
     <format>%03.3f</format>
    </chunk>
 
+   <!-- 5: acceleration -->
    <chunk>
     <name>udot-ft_sec2</name>
     <node>/fdm/jsbsim/accelerations/udot-ft_sec2</node>
@@ -26,23 +54,26 @@
     <format>%03.3f</format>
    </chunk>
 
+   <!-- 6: path angle (rad)-->
    <chunk>
     <name>gamma-rad</name>
     <node>/fdm/jsbsim/flight-path/gamma-rad</node>
     <type>float</type>
     <format>%03.4f</format>
    </chunk>
-
-   <chunk>
+    
+   <!-- 7: heading angle (rad)-->
+  <chunk>
     <name>psi-gt-rad</name>
     <node>/fdm/jsbsim/flight-path/psi-gt-rad</node>
     <type>float</type>
     <format>%03.4f</format>
-   </chunk>
-
+  </chunk>
+  
+   <!-- 8: roll angle (rad)-->
    <chunk>
-    <name>phi-deg</name>
-    <node>/fdm/jsbsim/attitude/phi-deg</node>
+    <name>phi-rad</name>
+    <node>/fdm/jsbsim/attitude/phi-rad</node>
     <type>float</type>
     <format>%03.4f</format>
    </chunk>
@@ -75,12 +106,6 @@
     <format>%03.4f</format>
    </chunk>
 
-   <chunk>
-    <name>h-agl-ft</name>
-    <node>/fdm/jsbsim/position/h-agl-ft</node>
-    <type>float</type>
-    <format>%03.4f</format>
-   </chunk>
 
    <chunk>
     <name>lat-gc-deg</name>
@@ -96,19 +121,6 @@
     <format>%03.10f</format>
    </chunk>
    
-   <chunk>
-    <name>posx</name>
-    <node>/position/posx</node>
-    <type>float</type>
-    <format>%03.3f</format>
-   </chunk>
-
-   <chunk>
-    <name>posy</name>
-    <node>/position/posy</node>
-    <type>float</type>
-    <format>%03.3f</format>
-   </chunk>
   </output>
  </generic>
 </PropertyList>
