@@ -5,38 +5,43 @@ import subprocess
 import time
 import signal
 import os
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui
 import pyqtgraph.exporters
 import pyqtgraph as pg
 import pandas as pd
 
 
-def run_fg_script(script,vehicle):
+def run_fg_script(script, vehicle):
     """ Run a FlightGear startup script """
     command = [script]
-    for key, value in vehicle.arguments.iteritems(): 
+    for key, value in vehicle.arguments.items():
         command.append('--' + key + '=' + str(value))
-    command.append('--callsign="%s"' %vehicle.name)
-    command.append('--multiplay=out,60,127.0.0.1,%i' %(vehicle.mp_output_port))
-    command.append('--multiplay=in,60,127.0.0.1,%i' %(vehicle.mp_input_port))
+    command.append('--callsign="%s"' % vehicle.name)
+    command.append('--multiplay=out,60,127.0.0.1,%i' %
+                   (vehicle.mp_output_port))
+    command.append('--multiplay=in,60,127.0.0.1,%i' % (vehicle.mp_input_port))
     command.append('--generic=socket,in,180,localhost,%i,udp,%s'
-                    %(vehicle.control.output_port, vehicle.control.input_protocol))
-    command.append('--generic=socket,out,180,localhost,%i,udp,%s' 
-                    %(vehicle.control.input_port, vehicle.control.output_protocol))
-    command.append('--props=socket,bi,20,,%i,tcp' %vehicle.command.port)
+                   % (vehicle.control.output_port, vehicle.control.input_protocol))
+    command.append('--generic=socket,out,180,localhost,%i,udp,%s'
+                   % (vehicle.control.input_port, vehicle.control.output_protocol))
+    command.append('--props=socket,bi,20,,%i,tcp' % vehicle.command.port)
     command.append('--prop:/engines/engine[0]/running=true')
     command.append('--prop:/engines/engine[1]/running=true')
     command.append('--prop:/engines/engine[2]/running=true')
     command.append('--prop:/engines/engine[3]/running=true')
-    print(command)
+    print("Attempt to start flightgear: ")
+    print(*command, sep="  ")
+
     proc = subprocess.Popen(command, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, preexec_fn=os.setsid)
     return proc
 
 # MAIN PROGRAM
-#---------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------
+
+
 class SimulationGUI(QtGui.QWidget):
-    """ Base GUI class for sending commands to the JSBSim/FlightGear 
+    """ Base GUI class for sending commands to the JSBSim/FlightGear
         landing simulation. """
     simulation_running = False
     pause_sim = False
@@ -53,7 +58,7 @@ class SimulationGUI(QtGui.QWidget):
     def init_telnet(self, vehicle):
         """ Send command to control system of vehicle. """
         if not vehicle.running:
-            print("%s is not runnning" %vehicle.name)
+            print("%s is not runnning" % vehicle.name)
         else:
             vehicle.command.telnet_connect()
         vehicle.command.view_next()
@@ -67,7 +72,7 @@ class SimulationGUI(QtGui.QWidget):
         self.stop_control()
         self.close_flightgear()
         self.remove_files()
-        event.accept() # let the window close
+        event.accept()  # let the window close
 
     def create_menus(self):
         """ Create the buttons and radio buttons """
@@ -98,36 +103,37 @@ class SimulationGUI(QtGui.QWidget):
         self.buttons_layout.addWidget(self.reset_btn, 2, 0, 1, 1)
         self.buttons_layout.addWidget(self.pause_btn, 2, 1, 1, 1)
         self.buttons_layout.addWidget(self.start_sim_btn, 3, 0, 1, 2)
-        #self.buttons_layout.addWidget(self.simulation_btn, 2, 0, 1, 1)
+        # self.buttons_layout.addWidget(self.simulation_btn, 2, 0, 1, 1)
         self.buttons_layout.addWidget(self.stop_btn, 4, 0, 1, 1)
         self.buttons_layout.addWidget(self.exit_btn, 4, 1, 1, 1)
 
         # RADIO BUTTONS
         self.settings_layout = QtGui.QGridLayout()
-        ctrl_ = {'PID': {'check':False},
-                 'TECS': {'check':True}, 'fn': self.toggle_ctrl}
+        ctrl_ = {'PID': {'check': False},
+                 'TECS': {'check': True}, 'fn': self.toggle_ctrl}
 
-        mode_ = {'Land':  {'check':False},
-                 'Hold':  {'check':True},
-                 'Align': {'check':False}, 'fn':self.toggle_mode}
+        mode_ = {'Land':  {'check': False},
+                 'Hold':  {'check': True},
+                 'Align': {'check': False}, 'fn': self.toggle_mode}
 
-        hold_ = {'Wings-level':  {'check':False},
-                 'Heading': {'check':True}, 'fn':self.toggle_hold}
+        hold_ = {'Wings-level':  {'check': False},
+                 'Heading': {'check': True}, 'fn': self.toggle_hold}
 
-        acc_ = {'Acceleration':  {'check':False},
-                'Velocity': {'check':True}, 'fn':self.toggle_acc_hold}
+        acc_ = {'Acceleration':  {'check': False},
+                'Velocity': {'check': True}, 'fn': self.toggle_acc_hold}
 
-        alt_ = {'Altitude':  {'check':True},
-                'gamma': {'check':False}, 'fn':self.toggle_alt_hold}
+        alt_ = {'Altitude':  {'check': True},
+                'gamma': {'check': False}, 'fn': self.toggle_alt_hold}
 
-        groups = {'ctrl':ctrl_, 'mode':mode_, 'hold':hold_, 'acc':acc_, 'alt':alt_}
+        groups = {'ctrl': ctrl_, 'mode': mode_,
+                  'hold': hold_, 'acc': acc_, 'alt': alt_}
         rbs = {}
-        for group_name, group in groups.iteritems():
+        for group_name, group in groups.items():
             new_group = QtGui.QButtonGroup(self.buttons_layout)
             new_group.buttonClicked.connect(group.pop('fn', None))
             i = 0
             rbs[group_name] = {}
-            for name, values in group.iteritems():
+            for name, values in group.items():
                 rbs[group_name][i] = QtGui.QRadioButton(name)
                 rbs[group_name][i].setObjectName(name)
                 rbs[group_name][i].setChecked(values['check'])
@@ -137,7 +143,8 @@ class SimulationGUI(QtGui.QWidget):
 
         self.groups = groups
 
-        self.settings_layout.addWidget(QtGui.QLabel('Control settings'), 0, 0, 1, 4)
+        self.settings_layout.addWidget(
+            QtGui.QLabel('Control settings'), 0, 0, 1, 4)
         self.settings_layout.addWidget(rbs['ctrl'][0], 1, 0, 1, 1)
         self.settings_layout.addWidget(rbs['ctrl'][1], 1, 1, 1, 1)
         self.settings_layout.addWidget(rbs['mode'][2], 2, 0, 1, 1)
@@ -153,11 +160,12 @@ class SimulationGUI(QtGui.QWidget):
         # Sliders
         for vehicle in self.vehicles:
             # Vehicle label
-            vehicle.text = QtGui.QLabel('%s\n' %vehicle.name)
+            vehicle.text = QtGui.QLabel('%s\n' % vehicle.name)
             vehicle.text.setAlignment(QtCore.Qt.AlignCenter)
-            vehicle.text.setStyleSheet('font-weight: 500;text-decoration:underline;')
+            vehicle.text.setStyleSheet(
+                'font-weight: 500;text-decoration:underline;')
             # One slider for every property
-            for name, values in vehicle.control_variables.iteritems():
+            for name, values in vehicle.control_variables.items():
                 slider = QtGui.QSlider(QtCore.Qt.Horizontal)
                 slider.setRange(*values['range'])
                 slider.setTickPosition(QtGui.QSlider.TicksBelow)
@@ -165,13 +173,14 @@ class SimulationGUI(QtGui.QWidget):
                 slider.id = vehicle.id
                 slider.valueChanged.connect(self.slider_moving)
                 vehicle.control_variables[name]['slider'] = slider
-                vehicle.control_variables[name]['text'] = QtGui.QLabel('%s: 0.0' %name)
+                vehicle.control_variables[name]['text'] = QtGui.QLabel(
+                    '%s: 0.0' % name)
         i = 5
         j = 1
         for vehicle in self.vehicles:
             self.settings_layout.addWidget(vehicle.text, i+j, 0, 1, 4)
-            j +=1
-            for name, prop in vehicle.control_variables.iteritems():
+            j += 1
+            for name, prop in vehicle.control_variables.items():
                 slider = prop['slider']
                 text = prop['text']
                 self.settings_layout.addWidget(text, i+j, 0, 1, 1)
@@ -187,13 +196,15 @@ class SimulationGUI(QtGui.QWidget):
         if self.uav_file_exists:
             self.uav.command.reset()
             time.sleep(0.5)
-            files = [file for file in os.listdir('logs/') if file.startswith('Rascal_')]
+            files = [file for file in os.listdir(
+                'logs/') if file.startswith('Rascal_')]
             if len(files) > 0:
                 self.UAV_FILE = './logs/' + sorted(files, reverse=True)[0]
         if self.ugv_file_exists:
             self.ugv.command.reset()
             time.sleep(0.5)
-            files = [file for file in os.listdir('logs/') if file.startswith('ground-vehicle_')]
+            files = [file for file in os.listdir(
+                'logs/') if file.startswith('ground-vehicle_')]
             if len(files) > 0:
                 self.UGV_FILE = './logs/' + sorted(files, reverse=True)[0]
 
@@ -220,7 +231,7 @@ class SimulationGUI(QtGui.QWidget):
             self.start_sim_btn.setEnabled(False)
             self.proc = []
             for vehicle in self.vehicles:
-                self.proc.append(run_fg_script(vehicle.path, vehicle))            
+                self.proc.append(run_fg_script(vehicle.path, vehicle))
                 time.sleep(0.3)
 
             for vehicle in self.vehicles:
@@ -231,7 +242,6 @@ class SimulationGUI(QtGui.QWidget):
             self.start_sim_btn.setText('Start')
             for proc in self.proc:
                 proc.terminate()
-
 
     def simulation_start_stop(self):
         """ Callback for simulation button """
@@ -256,7 +266,8 @@ class SimulationGUI(QtGui.QWidget):
     def remove_files(self):
         """ Delete old files before exiting. """
         if self.uav_file_exists:
-            files = [file for file in os.listdir('logs/') if file.startswith('Rascal')]
+            files = [file for file in os.listdir(
+                'logs/') if file.startswith('Rascal')]
             for file in files:
                 if './logs/' + file != self.UAV_FILE:
                     os.remove('./logs/' + file)
@@ -264,14 +275,14 @@ class SimulationGUI(QtGui.QWidget):
                     new_file = file
             os.rename('./logs/' + new_file, './logs/Rascal.csv')
         if self.ugv_file_exists:
-            files = [file for file in os.listdir('logs/') if file.startswith('followme')]
+            files = [file for file in os.listdir(
+                'logs/') if file.startswith('followme')]
             for file in files:
                 if './logs/' + file != self.UGV_FILE:
                     os.remove('./logs/' + file)
                 else:
                     new_file = file
-            os.rename('./logs/' +  new_file, './logs/followme.csv')
-
+            os.rename('./logs/' + new_file, './logs/followme.csv')
 
     def close_flightgear(self):
         """ Kill the FG processes before shutting down Python """
@@ -283,7 +294,6 @@ class SimulationGUI(QtGui.QWidget):
             print("No FlightGear processes running")
         for vehicle in self.vehicles:
             vehicle.running = False
-
 
     def stop_control(self):
         print("Stop control system")
@@ -300,7 +310,7 @@ class SimulationGUI(QtGui.QWidget):
             self.sim.ap_mode = 'ALIGN'
             for vehicle in self.vehicles:
                 vehicle.command.align_mode()
-            for button in  self.groups['hold'].buttons():
+            for button in self.groups['hold'].buttons():
                 button.setEnabled(False)
             for vehicle in self.vehicles:
                 for prop in vehicle.control_variables.values():
@@ -322,7 +332,7 @@ class SimulationGUI(QtGui.QWidget):
             self.sim.ap_mode = 'LAND'
             for vehicle in self.vehicles:
                 vehicle.command.landing_mode()
-            for button in  self.groups['hold'].buttons():
+            for button in self.groups['hold'].buttons():
                 button.setEnabled(False)
             for vehicle in self.vehicles:
                 for prop in vehicle.control_variables.values():
@@ -348,12 +358,13 @@ class SimulationGUI(QtGui.QWidget):
             if name == 'Wings-level':
                 uav.command.wings_level()
                 for vehicle in self.vehicles:
-                        vehicle.control_variables['Heading']['slider'].setEnabled(False)
+                    vehicle.control_variables['Heading']['slider'].setEnabled(
+                        False)
             elif name == 'Heading':
                 uav.command.control_heading()
                 for vehicle in self.vehicles:
-                        vehicle.control_variables['Heading']['slider'].setEnabled(True)
-
+                    vehicle.control_variables['Heading']['slider'].setEnabled(
+                        True)
 
     def toggle_acc_hold(self, btn):
         """ Callback for acceleration button group. Changes the hold mode of the system. """
@@ -362,16 +373,19 @@ class SimulationGUI(QtGui.QWidget):
             for vehicle in self.vehicles:
                 vehicle.command.control_velocity()
             for vehicle in self.vehicles:
-                vehicle.control_variables['Acceleration']['slider'].setEnabled(False)
-                vehicle.control_variables['Velocity']['slider'].setEnabled(True)
+                vehicle.control_variables['Acceleration']['slider'].setEnabled(
+                    False)
+                vehicle.control_variables['Velocity']['slider'].setEnabled(
+                    True)
         elif name == 'Acceleration':
             for vehicle in self.vehicles:
                 vehicle.command.control_acceleration()
             for vehicle in self.vehicles:
-                vehicle.control_variables['Acceleration']['slider'].setEnabled(True)
-                vehicle.control_variables['Velocity']['slider'].setEnabled(False)
+                vehicle.control_variables['Acceleration']['slider'].setEnabled(
+                    True)
+                vehicle.control_variables['Velocity']['slider'].setEnabled(
+                    False)
 
-        
     def toggle_alt_hold(self, btn):
         """ Callback for altitude button group. Changes the hold mode of the system. """
         name = btn.objectName()
@@ -386,7 +400,6 @@ class SimulationGUI(QtGui.QWidget):
                 uav.control_variables['Altitude']['slider'].setEnabled(False)
                 uav.control_variables['Gamma']['slider'].setEnabled(True)
 
-
     def slider_moving(self, value):
         prop = str(self.sender().objectName())
         id_ = str(self.sender().id)
@@ -395,7 +408,7 @@ class SimulationGUI(QtGui.QWidget):
         try:
             vehicle.control.setpoint[prop.lower()] = value
         except:
-            raise ValueError("ID given: %s. Acceptable IDs are 'uav' or 'ugv'." %id_)
-        vehicle.control_variables[prop]['text'].setText('%s: %2.1f' %(prop, value))
-
-
+            raise ValueError(
+                "ID given: %s. Acceptable IDs are 'uav' or 'ugv'." % id_)
+        vehicle.control_variables[prop]['text'].setText(
+            '%s: %2.1f' % (prop, value))

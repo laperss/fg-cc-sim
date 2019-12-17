@@ -30,7 +30,7 @@ import cvxpy
 import numpy as np
 import matplotlib.pyplot as plt
 
-                   #  x    y    v     a     psi
+#  x    y    v     a     psi
 A_lat = np.matrix([[1.0, 0.0, 0.18, 0.01448, 0.0,      0.0, 0.0, 0.0, 0.0, 0.0],
                    [0.0, 1.0, 0.0, 0.0,      3.31,     0.0, 0.0, 0.0, 0.0, 0.0],
                    [0.0, 0.0, 1.0, 0.1521,   0.0,      0.0, 0.0, 0.0, 0.0, 0.0],
@@ -48,16 +48,16 @@ B_lat = np.matrix([[0.0016,  0.0, 0.0, 0.0,      0.0,     0.0],
                    [0.0,     0.0, 0.0, 0.0,      0.01517, 0.2789],
                    [0.0257,  0.0, 0.0, 0.0,      0.0,     0.0],
                    [0.2701,  0.0, 0.0, 0.0,      0.0,     0.0],
-                   [0.0,     0.0, 0.0, 0.0,      0.03768, 0.1212], 
-#
+                   [0.0,     0.0, 0.0, 0.0,      0.03768, 0.1212],
+                   #
                    [0.0,     0.0, 0.0077, 0.0,    0.0,    0.0],
                    [0.0,     0.0, 0.0,    0.488,  0.0,    0.0],
                    [0.0,     0.0, 0.1024, 0.0,    0.0,    0.0],
                    [0.0,     0.0, 0.6856, 0.0,    0.0,    0.0],
                    [0.0,     0.0, 0.0,    0.2532, 0.0,    0.0]])
 
-A_lon = np.matrix([[ 1., 3.925],
-                   [ 0., 0.746]])
+A_lon = np.matrix([[1., 3.925],
+                   [0., 0.746]])
 
 B_lon = np.matrix([[-0.2788],
                    [0.2508]])
@@ -68,11 +68,11 @@ constraints_uav = [(-10000, 10000),  # x
                    (-1, 150),        # h
                    (18, 27.5),       # v
                    (-0.5, 1.0),      # a
-                   (math.radians(-10), math.radians(10)), # heading
-                   (math.radians(-5), math.radians(15))] # flight path
+                   (math.radians(-10), math.radians(10)),  # heading
+                   (math.radians(-5), math.radians(15))]  # flight path
 
 
-constraints_ugv = [(-10000, 10000), 
+constraints_ugv = [(-10000, 10000),
                    (-10000, 10000),
                    (0, 27.5),
                    (-1.0, 1.0),
@@ -80,15 +80,16 @@ constraints_ugv = [(-10000, 10000),
 
 # INPUT CONSTRAINTS
 constraints_uav_input = [(-0.5, 1.0),      # a
-                         (math.radians(-10), math.radians(10)), # heading
-                         (math.radians(-7), math.radians(15))] # flight path
-                    
+                         (math.radians(-10), math.radians(10)),  # heading
+                         (math.radians(-7), math.radians(15))]  # flight path
+
 constraints_ugv_input = [(-1.0, 1.0),      # a
-                         (math.radians(-10), math.radians(10))] # heading
+                         (math.radians(-10), math.radians(10))]  # heading
 
 
-# Controller constraints 
-state_constraints_lat = constraints_uav[0:2] + constraints_uav[3:6] + constraints_ugv[:]
+# Controller constraints
+state_constraints_lat = constraints_uav[0:2] + \
+    constraints_uav[3:6] + constraints_ugv[:]
 state_constraints_lon = [constraints_uav[2], constraints_uav[6]]
 
 input_constraints_lat = constraints_uav_input[0:2] + constraints_ugv[:]
@@ -97,8 +98,8 @@ input_constraints_lon = [constraints_uav_input[2]]
 
 def add_align_constraints(ctrl):
     """ Add the alignment constraints for the longitudinal MPC """
-    ctrl.u_delay = cvxpy.Parameter(4, 4, "u_delay")
-    ctrl.past_input = cvxpy.Variable(4, ctrl.T + 4, "past_input")
+    ctrl.u_delay = cvxpy.Parameter((4, 4), "u_delay")
+    ctrl.past_input = cvxpy.Variable((4, ctrl.T + 4), "past_input")
 
     deltax = cvxpy.sum_squares(ctrl.x[0, 2:] - ctrl.x[5, 2:])
     deltay = cvxpy.sum_squares(ctrl.x[1, 10:] - ctrl.x[6, 10:])
@@ -113,37 +114,41 @@ def add_align_constraints(ctrl):
     for t in range(ctrl.T):
         ctrl.objective.append(2*cvxpy.sum_squares(ctrl.u[:, t]))
 
-    for t in range(2,ctrl.T):
-        # UAV velocity -> 20 
+    for t in range(2, ctrl.T):
+        # UAV velocity -> 20
         ctrl.objective.append(cvxpy.sum_squares(ctrl.x[2, t] - 20))
         ctrl.objective.append(cvxpy.sum_squares(ctrl.x[7, t] - 20))
         # Rate of change, acceleration
-        ctrl.objective.append(1*cvxpy.sum_squares(ctrl.u[2, t] - ctrl.u[2, t-1]))
-        ctrl.objective.append(3*cvxpy.sum_squares(ctrl.u[0, t] - ctrl.u[0, t-1]))
+        ctrl.objective.append(
+            1*cvxpy.sum_squares(ctrl.u[2, t] - ctrl.u[2, t-1]))
+        ctrl.objective.append(
+            3*cvxpy.sum_squares(ctrl.u[0, t] - ctrl.u[0, t-1]))
 
     ### END CONSTRAINTS ###
     # Distance
     ctrl.constraints += [ctrl.x[0, -1] - ctrl.x[5, -1] <= 1.0]    # deltax
-    ctrl.constraints += [ctrl.x[0, -1] - ctrl.x[5, -1] >= -1.0] 
+    ctrl.constraints += [ctrl.x[0, -1] - ctrl.x[5, -1] >= -1.0]
     ctrl.constraints += [ctrl.x[1, -1] - ctrl.x[6, -1] <= 1.0]    # deltay
     ctrl.constraints += [ctrl.x[1, -1] - ctrl.x[6, -1] >= -1.0]
     # Velocity
-    ctrl.constraints += [ctrl.x[2, -1] - ctrl.x[7, -1] == 0] 
+    ctrl.constraints += [ctrl.x[2, -1] - ctrl.x[7, -1] == 0]
     # Acceleration
-    ctrl.constraints += [ctrl.x[3, -1] - ctrl.x[8, -1] == 0] 
+    ctrl.constraints += [ctrl.x[3, -1] - ctrl.x[8, -1] == 0]
 
     ### Dynamic constriants ###
     # Include past inputs: 0 = t-4, 1 = t-3, 2 = t-2, 3 = t-1, 4=t
-    ctrl.constraints += [ctrl.past_input[:,0:4] == ctrl.u_delay]
-    ctrl.constraints += [ctrl.past_input[:,4:] == ctrl.u[:,:]]
+    ctrl.constraints += [ctrl.past_input[:, 0:4] == ctrl.u_delay]
+    ctrl.constraints += [ctrl.past_input[:, 4:] == ctrl.u[:, :]]
 
     ctrl.constraints += [ctrl.x[:, 1:ctrl.T+1] == ctrl.A*ctrl.x[:, 0:ctrl.T]
-                         + ctrl.B[:,0]*ctrl.u[0,0:ctrl.T]              #a_uav(t)
-                         + ctrl.B[:,2]*ctrl.u[2,0:ctrl.T]              #a_ugv(t)
-                         + ctrl.B[:,3]*ctrl.u[3,0:ctrl.T]              #psi_ugv(t)
-                         + ctrl.B[:,4]*ctrl.past_input[1, 2:ctrl.T+2]  #psi_uav(t - 2)
-                         + ctrl.B[:,5]*ctrl.past_input[1, 1:ctrl.T+1]] #psi_uav(t - 3)
+                         + ctrl.B[:, 0]*ctrl.u[None, 0, 0:ctrl.T]  # a_uav(t)
+                         + ctrl.B[:, 2]*ctrl.u[None, 2, 0:ctrl.T]  # a_ugv(t)
+                         + ctrl.B[:, 3]*ctrl.u[None, 3, 0:ctrl.T]  # psi_ugv(t)
+                         + ctrl.B[:, 4]*ctrl.past_input[None, 1,
+                                                        2:ctrl.T+2]  # psi_uav(t - 2)
+                         + ctrl.B[:, 5]*ctrl.past_input[None, 1, 1:ctrl.T+1]]  # psi_uav(t - 3)
     return ctrl
+
 
 d_safe = 2.5
 d_land = 1.2
@@ -152,67 +157,75 @@ d_safe_s = d_safe - 1
 d_land_s = d_land - 0.5
 h_safe_s = h_safe + 0.6
 
+
 def add_alt_constraints(ctrl):
     """ Add the altitide constraints for the vertical MPC """
-    ctrl.b1 = cvxpy.Parameter(ctrl.T)
-    ctrl.b2 = cvxpy.Parameter(ctrl.T)
-    ctrl.distance = cvxpy.Parameter(ctrl.T, sign="positive")
+    ctrl.b1 = cvxpy.Parameter((ctrl.T))
+    ctrl.b2 = cvxpy.Parameter((ctrl.T))
+    ctrl.distance = cvxpy.Parameter((ctrl.T))
 
-    ctrl.s1 = cvxpy.Variable(3, ctrl.T-1)
+    ctrl.s1 = cvxpy.Variable((3, ctrl.T-1))
 
     ctrl.objective.append(1*cvxpy.sum_squares(ctrl.x[0, ctrl.T])    # End altitude
-                          + 1*cvxpy.sum_squares(ctrl.x[1,:])      # Angle size
-                          + 500*cvxpy.sum_squares(ctrl.s1)          # Slack variable
+                          + 1*cvxpy.sum_squares(ctrl.x[1, :])      # Angle size
+                          # Slack variable
+                          + 500*cvxpy.sum_squares(ctrl.s1)
                           )
-    ctrl.objective.append(cvxpy.sum_entries(30.*ctrl.b1*ctrl.x[0,:]))
+    ctrl.objective.append(cvxpy.sum(30.*(ctrl.x[None, 0, 1:]*ctrl.b1)))
 
     # Positive altitude
-    ctrl.constraints +=  [ctrl.x[0,1:]  >= -2]
+    ctrl.constraints += [ctrl.x[0, 1:] >= -2]
 
     # Landing constraints - Stay within safe set
-    ctrl.constraints += [ctrl.x[0,1:] >= h_safe - 1000*ctrl.b1.T]
-    ctrl.constraints += [(d_safe - d_land)*ctrl.x[0,1:] + h_safe*ctrl.distance.T >= -h_safe*d_land - 1000.*ctrl.b2.T]
-    ctrl.constraints += [(d_safe - d_land)*ctrl.x[0,1:] - h_safe*ctrl.distance.T >= -h_safe*d_land - 1000.*ctrl.b2.T]
+    ctrl.constraints += [ctrl.x[0, 1:] >= h_safe - 1000*ctrl.b1.T]
+    ctrl.constraints += [(d_safe - d_land)*ctrl.x[0, 1:] +
+                         h_safe*ctrl.distance.T >= -h_safe*d_land - 1000.*ctrl.b2.T]
+    ctrl.constraints += [(d_safe - d_land)*ctrl.x[0, 1:] -
+                         h_safe*ctrl.distance.T >= -h_safe*d_land - 1000.*ctrl.b2.T]
 
-    ctrl.constraints +=  [ctrl.x[0,2:] >= (h_safe_s - ctrl.s1[0,:]) -1000.*ctrl.b1[1:].T] 
-    ctrl.constraints += [(d_safe_s - d_land_s)*(ctrl.x[0,2:]) + h_safe_s*ctrl.distance[1:].T >= - (h_safe_s)*(d_land_s) - ctrl.s1[1,:] - 5000.*ctrl.b2[1:].T]
-    ctrl.constraints += [(d_safe_s - d_land_s)*(ctrl.x[0,2:]) - h_safe_s*ctrl.distance[1:].T >= - (h_safe_s)*(d_land_s) - ctrl.s1[2,:] - 5000.*ctrl.b2[1:].T]
+    ctrl.constraints += [ctrl.x[0, 2:] >=
+                         (h_safe_s - ctrl.s1[0, :]) - 1000.*ctrl.b1[1:].T]
+    ctrl.constraints += [(d_safe_s - d_land_s)*(ctrl.x[0, 2:]) + h_safe_s *
+                         ctrl.distance[1:].T >= - (h_safe_s)*(d_land_s) - ctrl.s1[1, :] - 5000.*ctrl.b2[1:].T]
+    ctrl.constraints += [(d_safe_s - d_land_s)*(ctrl.x[0, 2:]) - h_safe_s *
+                         ctrl.distance[1:].T >= - (h_safe_s)*(d_land_s) - ctrl.s1[2, :] - 5000.*ctrl.b2[1:].T]
 
-    ctrl.constraints += [ctrl.s1[0,:]   <= 0.6, 
-                         ctrl.s1[1,:] <= 10,
-                         ctrl.s1[2,:] <= 10]
+    ctrl.constraints += [ctrl.s1[0, :] <= 0.6,
+                         ctrl.s1[1, :] <= 10,
+                         ctrl.s1[2, :] <= 10]
 
     # Vertical touchdown velocity
     gamma_td = math.radians(-2)
     gamma_lim = math.radians(-5)
     h_flare = 5
-    ctrl.constraints += [ctrl.x[1,1:ctrl.T+1] >= (gamma_lim-gamma_td)/h_flare*(ctrl.x[0,1:ctrl.T+1]) + gamma_td]
+    ctrl.constraints += [ctrl.x[1, 1:ctrl.T+1] >=
+                         (gamma_lim-gamma_td)/h_flare*(ctrl.x[0, 1:ctrl.T+1]) + gamma_td]
 
     # Dynamic constraints
     ctrl.constraints += [ctrl.x[:, 1:ctrl.T+1] == ctrl.A*ctrl.x[:, 0:ctrl.T]
                          + ctrl.B*ctrl.u[:, 0:ctrl.T]]
 
 
-
 class Controller(object):
     """ A class for executing the model predictive control"""
+
     def __init__(self, states, inputs, A, B, T, ds):
         self.T = T
         self.ds = ds
         self.states = states
         self.inputs = inputs
         self.n = A.shape[1]
-        self.m = (len(inputs)+1)/2
+        self.m = int((len(inputs)+1)/2)
         self.A = A
         self.B = B
         # states/inputs
-        self.x = cvxpy.Variable(self.n, self.T + 1, "x")
-        self.u = cvxpy.Variable(self.m, self.T, "u")
+        self.x = cvxpy.Variable((self.n, self.T + 1), "x")
+        self.u = cvxpy.Variable((self.m, self.T), "u")
         # slack variables
-        self.s0 = cvxpy.Variable(self.n, self.T, "s")
+        self.s0 = cvxpy.Variable((self.n, self.T), "s")
         # initial conditions
-        self.x0 = cvxpy.Parameter(self.n,1, "x0")
-        self.u0 = cvxpy.Parameter(self.m,1, "u0")
+        self.x0 = cvxpy.Parameter((self.n), "x0")
+        self.u0 = cvxpy.Parameter((self.m), "u0")
 
         self.constraints = self.init_constraints()
         self.objective = self.init_objective()
@@ -220,17 +233,19 @@ class Controller(object):
     def init_constraints(self):
         """ Add limits and state dynamics constraints to the constraint vector"""
         # Initial conditions
-        constraints = [self.x[:,0] == self.x0]
-        constraints += [self.u[:,0] == self.u0]
+        constraints = [self.x[:, 0] == self.x0]
+        constraints += [self.u[:, 0] == self.u0]
         # State and input constraints
         for i in range(self.m):
             constraints += [self.u[i, :] <= self.inputs[i][1]]
             constraints += [self.u[i, :] >= self.inputs[i][0]]
         for i in range(self.n):
-            constraints += [self.x[i, 2:] <= self.states[i][1] + self.s0[i, 1:]]
-            constraints += [self.x[i, 2:] >= self.states[i][0] - self.s0[i, 1:]]
+            constraints += [self.x[i, 2:] <=
+                            self.states[i][1] + self.s0[i, 1:]]
+            constraints += [self.x[i, 2:] >=
+                            self.states[i][0] - self.s0[i, 1:]]
             # slack variable constraint
-            constraints += [self.s0[i, :] > 0]
+            constraints += [self.s0[i, :] >= 0]
             constraints += [self.s0[i, :] <= self.states[i][1]/10]
         return constraints
 
@@ -239,7 +254,7 @@ class Controller(object):
         objective = [500*cvxpy.sum_squares(self.s0)]
         return objective
 
-    def solve(self, initial_state, initial_input = [0,0,0,0], distance = None):
+    def solve(self, initial_state, initial_input=[0, 0, 0, 0], distance=None):
         """ Add the initial conditions to the optimization problem """
         self.x0.value = initial_state
         self.u0.value = initial_input
@@ -250,14 +265,14 @@ class Controller(object):
 
 
 def plot_altitude_result():
-    h1 = alt_ctrl.x[0, :].value.A.flatten() # h
-    h2 = alt_ctrl.x[1, :].value.A.flatten() # gamma
+    h1 = alt_ctrl.x[0, :].value.A.flatten()  # h
+    h2 = alt_ctrl.x[1, :].value.A.flatten()  # gamma
 
-    v1 = alt_ctrl.u[0, :].value.A.flatten() # gamma des
+    v1 = alt_ctrl.u[0, :].value.A.flatten()  # gamma des
 
     plt.figure(1)
 
-    plt.plot(h1[1:], label='alt') 
+    plt.plot(h1[1:], label='alt')
     plt.plot(h2[1:]*180/3.14, label='gamma')
     plt.plot(v1[1:]*180/3.14, label='input')
     plt.legend(loc="upper right")
@@ -277,28 +292,27 @@ def plot_altitude_result():
     plt.ylim([-1, 10])
     plt.xlim([-5, 5])
 
-
     plt.show()
 
 
 def plot_align_result(x, u):
     # UAV ----------------------------------------
-    x1 = x[0, :].value.A.flatten() # x
-    x2 = x[1, :].value.A.flatten() # y
-    x3 = x[2, :].value.A.flatten() # v
-    x4 = x[3, :].value.A.flatten() # a
-    x5 = x[4, :].value.A.flatten() # chi
+    x1 = x[0, :].value.A.flatten()  # x
+    x2 = x[1, :].value.A.flatten()  # y
+    x3 = x[2, :].value.A.flatten()  # v
+    x4 = x[3, :].value.A.flatten()  # a
+    x5 = x[4, :].value.A.flatten()  # chi
     # UGV ----------------------------------------
-    x6 = x[5, :].value.A.flatten() # x
-    x7 = x[6, :].value.A.flatten() # y
-    x8 = x[7, :].value.A.flatten() # v
-    x9 = x[8, :].value.A.flatten() # a
-    x10 = x[9, :].value.A.flatten() # chi
+    x6 = x[5, :].value.A.flatten()  # x
+    x7 = x[6, :].value.A.flatten()  # y
+    x8 = x[7, :].value.A.flatten()  # v
+    x9 = x[8, :].value.A.flatten()  # a
+    x10 = x[9, :].value.A.flatten()  # chi
     # UAV ----------------------------------------
-    u1 = u[0, :].value.A.flatten() # a des
-    u2 = u[1, :].value.A.flatten() # chi des
-    u3 = u[2, :].value.A.flatten() # a des
-    u4 = u[3, :].value.A.flatten() # chi des
+    u1 = u[0, :].value.A.flatten()  # a des
+    u2 = u[1, :].value.A.flatten()  # chi des
+    u3 = u[2, :].value.A.flatten()  # a des
+    u4 = u[3, :].value.A.flatten()  # chi des
 
     f = plt.figure()
     ax = f.add_subplot(221)
@@ -324,7 +338,7 @@ def plot_align_result(x, u):
     # Plot (x_t)_1.
     plt.subplot(2, 2, 3)
 
-    #plt.plot(x1,label='x')
+    # plt.plot(x1,label='x')
     #plt.plot(x2, label='y')
     plt.plot(x3, label='v')
     plt.plot(x4, label='a')
@@ -348,23 +362,21 @@ def plot_align_result(x, u):
     plt.tight_layout()
     plt.legend(loc="upper right")
 
-
     f2 = plt.figure()
     plt.plot(u2*180/math.pi, label=r'$\chi_{des, uav}$')
     plt.plot(u4*180/math.pi, label=r'$\chi_{des, ugv}$')
     plt.plot(x5*180/math.pi, label=r'$\chi_{uav}$')
     plt.plot(x10*180/math.pi, label=r'$\chi_{ugv}$')
-    #print(u2*180/math.pi)
+    # print(u2*180/math.pi)
     plt.legend(loc="upper right")
 
-
     plt.show()
+
 
 if __name__ == "__main__":
     UAV = Vehicle()
     UGV = Vehicle()
 
-    
     UAV.a.min_ = -0.5
     UAV.a.max_ = 1.0
     UAV.a_des.min_ = -0.5
@@ -375,36 +387,28 @@ if __name__ == "__main__":
 
     T = 36
     ds = 0.18
-    ###################################################################    
+    ###################################################################
     align_ctrl = Controller([UAV.x, UAV.y, UAV.v, UAV.a, UAV.chi,
                              UGV.x, UGV.y, UGV.v, UGV.a, UGV.chi],
                             [UAV.a_des, UAV.chi_des, UGV.a_des, UGV.chi_des],
                             A_lat, B_lat, T, ds)
     align_ctrl = add_align_constraints(align_ctrl)
-    
+
     alt_ctrl = Controller([UAV.h, UAV.gamma],
                           [UAV.gamma_des],
                           A_lon, B_lon, T, ds)
     add_alt_constraints(alt_ctrl)
 
-
-    align_ctrl.u_delay.value = [[0, -0.0010435454644829075, 0, 0], [0, -0.0006125127053132244, 0, 0], [0, 2.571279146357698e-05, 0, 0], [0, 0.0009590111970212249, 0, 0]]
+    align_ctrl.u_delay.value = [[0, -0.0010435454644829075, 0, 0], [0, -0.0006125127053132244,
+                                                                    0, 0], [0, 2.571279146357698e-05, 0, 0], [0, 0.0009590111970212249, 0, 0]]
 
     state_t = [4.00, 0.479, 24.39641, 0.6562344, 0.004001,
                30.7, 0.412, 14.67612, -1.0922752, 0.00550]
 
-    input_t= [-0.5, 0.00071, -1.0571, 0.014]
-
-
-
-
+    input_t = [-0.5, 0.00071, -1.0571, 0.014]
 
     align_ctrl.solve(state_t, input_t)
 
     x = align_ctrl.x
     u = align_ctrl.u
     plot_align_result(x, u)
-
-
-
-

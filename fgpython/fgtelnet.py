@@ -16,8 +16,9 @@ Send some commands:
 from __future__ import print_function
 import time
 import socket
-from string import split
+#from string import split
 from telnetlib import Telnet
+
 
 def is_number(string):
     """ Return true if the string is a number """
@@ -26,6 +27,7 @@ def is_number(string):
         return True
     except ValueError:
         return False
+
 
 class FGTelnet(Telnet):
     """ Class for Telnet interface of Flightgear
@@ -42,6 +44,7 @@ class FGTelnet(Telnet):
         run - run a built in command
         set - set value of property
     """
+
     def __init__(self, host, port):
         Telnet.__init__(self, host, port)
         self.timeout = 5
@@ -75,7 +78,7 @@ class FGTelnet(Telnet):
                               [split(line, '  ', 1)[1] for line in help]))
         return dictionary
 
-    def ls(self,dir=None):
+    def ls(self, dir=None):
         """Returns a list of properties """
         if dir == None:
             self._put('ls')
@@ -103,13 +106,14 @@ class FGTelnet(Telnet):
 
     def _put(self, cmd):
         """ Send command to telnet """
-        Telnet.write(self, cmd + '\r\n')
+        Telnet.write(self, (cmd + '\r\n').encode())
         return
 
     def _get(self):
         """ Get response from telnet """
         resp = Telnet.read_until(self, '\n', self.timeout)
         return resp
+
 
 class FGTelnetConnection:
     """Interface for sending commands from Python to FlightGear """
@@ -126,7 +130,7 @@ class FGTelnetConnection:
                 self.telnet = FGTelnet(self.host, self.port)
             except (socket.error):
                 time.sleep(0.4)
-        print("Successfully connected to '%s %s'" %(self.host, self.port))
+        print("Successfully connected to '%s %s'" % (self.host, self.port))
 
     def __del__(self):
         """ Exit safely """
@@ -138,9 +142,12 @@ class FGTelnetConnection:
         if is_number(value):
             value = float(value)
             return value
-        elif value.strip() == "true": return True
-        elif value.strip() == "false": return False
-        else: return value
+        elif value.strip() == "true":
+            return True
+        elif value.strip() == "false":
+            return False
+        else:
+            return value
 
     def set(self, key, value):
         """Set a FlightGear property value."""
@@ -202,8 +209,8 @@ class FGTelnetConnection:
     def control_velocity(self):
         """ Control aircraft by desired velocity """
         if self.telnet:
-            self.telnet.set( "/fdm/jsbsim/ap/velocity_hold", 1)
-            self.telnet.set( "/fdm/jsbsim/ap/acceleration_hold", 0)
+            self.telnet.set("/fdm/jsbsim/ap/velocity_hold", 1)
+            self.telnet.set("/fdm/jsbsim/ap/acceleration_hold", 0)
 
     def control_acceleration(self):
         """ Control aircraft by desired velocity """

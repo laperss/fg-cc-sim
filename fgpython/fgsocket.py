@@ -17,7 +17,7 @@ Set the reference values to send:
 """
 from __future__ import print_function
 import math
-import thread
+import _thread
 import socket
 import re
 
@@ -25,6 +25,7 @@ RAD2DEG = 57.2957795
 DEG2RAD = 0.0174532925
 FEET2M = 0.3048
 M2FEET = 3.28084
+
 
 class FGSocketConnection(object):
     """ JSBSim communication system. 
@@ -37,9 +38,11 @@ class FGSocketConnection(object):
             * flightgear/protocols/InputProtocol.xml
     """
     heading = 199.67
+
     def __init__(self, input_port, output_port, in_protocol='InProtocol', out_protocol='OutProtocol'):
         self.data = []
-        self.setpoint = {'altitude': 0, 'velocity': 20, 'heading': 0, 'acceleration': 0, 'gamma':0}
+        self.setpoint = {'altitude': 0, 'velocity': 20,
+                         'heading': 0, 'acceleration': 0, 'gamma': 0}
         self.output_port = output_port
         self.input_port = input_port
         self.input_protocol = in_protocol
@@ -61,22 +64,26 @@ class FGSocketConnection(object):
         """ Send actuator commands to JSBSim/FlightGear via UDP. """
         message = ''
         for cmd in command[:-1]:
-            message = '%s%f, ' %(message, cmd)
-        message = '%s%s\n' %(message, str(command[-1]))
-        self.socket_out.sendto(message, ('localhost', port))
+            message = '%s%f, ' % (message, cmd)
+        message = '%s%s\n' % (message, str(command[-1]))
+        self.socket_out.sendto(message.encode(), ('localhost', port))
 
     def start_receive_state(self):
-        """ Starts the thread for reading data from flightGear """ 
+        """ Starts the thread for reading data from flightGear """
         self.update = True
-        thread.start_new_thread(self.receive_state,())
+        _thread.start_new_thread(self.receive_state, ())
 
     def receive_state(self):
         """ Separates data and updates the "data" variable"""
         while self.update == True:
             data, addr = self.socket_in.recvfrom(2048)
+            # print(data)
+            data = data.decode()
             data.rstrip('\n')
-            if not data: break
+            if not data:
+                break
             self.data = [float(i) for i in re.split(r'\t+', data)]
+            # print(self.data)
 
     def get_state(self, idx):
         """ Return the current vehicle state """
@@ -90,5 +97,3 @@ class FGSocketConnection(object):
                    self.setpoint['acceleration']*M2FEET,
                    math.radians(self.setpoint['gamma'])]
         self.send_command_udp(command, self.output_port)
-
-
