@@ -10,6 +10,10 @@ import pyqtgraph.exporters
 import pyqtgraph as pg
 import pandas as pd
 
+use_new_udp = True
+
+app = QtGui.QApplication([])   # THIS MAKES SOMETHING GO WRONG
+
 
 def run_fg_script(script, vehicle):
     """ Run a FlightGear startup script """
@@ -20,15 +24,16 @@ def run_fg_script(script, vehicle):
     command.append('--multiplay=out,60,127.0.0.1,%i' %
                    (vehicle.mp_output_port))
     command.append('--multiplay=in,60,127.0.0.1,%i' % (vehicle.mp_input_port))
-    command.append('--generic=socket,in,180,localhost,%i,udp,%s'
+    command.append('--generic=socket,in,100,localhost,%i,udp,%s'
                    % (vehicle.control.output_port, vehicle.control.input_protocol))
-    command.append('--generic=socket,out,180,localhost,%i,udp,%s'
+    command.append('--generic=socket,out,100,localhost,%i,udp,%s'
                    % (vehicle.control.input_port, vehicle.control.output_protocol))
-    command.append('--props=socket,bi,20,,%i,tcp' % vehicle.command.port)
-    command.append('--prop:/engines/engine[0]/running=true')
-    command.append('--prop:/engines/engine[1]/running=true')
-    command.append('--prop:/engines/engine[2]/running=true')
-    command.append('--prop:/engines/engine[3]/running=true')
+    # command.append('--generic=socket,out,50,localhost,%i,tcp,%s'
+    #               % (vehicle.control.input_port+4, vehicle.control.output_protocol))
+    command.append('--props=socket,bi,10,,%i,tcp' % vehicle.command.port)
+    command.append('--time-match-local')
+    # command.append('--prop:/sim/max-simtime-per-frame=0.01')
+
     print("Attempt to start flightgear: ")
     print(*command, sep="  ")
 
@@ -44,6 +49,8 @@ class SimulationGUI(QtGui.QWidget):
     """ Base GUI class for sending commands to the JSBSim/FlightGear
         landing simulation. """
     simulation_running = False
+    uav_file_exists = False
+    ugv_file_exists = False
     pause_sim = False
 
     def __init__(self, vehicles):
@@ -406,7 +413,21 @@ class SimulationGUI(QtGui.QWidget):
         # Get the correct vehicle from the ID
         vehicle, = [v for v in self.vehicles if v.id == id_]
         try:
-            vehicle.control.setpoint[prop.lower()] = value
+            print(prop)
+            if use_new_udp:
+                if prop.lower() == "acceleration":
+                    vehicle.control.setpoint.a_ref = value
+                elif prop.lower() == "velocity":
+                    vehicle.control.setpoint.v_ref = value
+                elif prop.lower() == "altitude":
+                    vehicle.control.setpoint.h_ref = value
+                elif prop.lower() == "gamma":
+                    vehicle.control.setpoint.gamma_ref = value
+                elif prop.lower() == "heading":
+                    vehicle.control.setpoint.psi_ref = value
+            else:
+                vehicle.control.setpoint[prop.lower()] = value
+
         except:
             raise ValueError(
                 "ID given: %s. Acceptable IDs are 'uav' or 'ugv'." % id_)
