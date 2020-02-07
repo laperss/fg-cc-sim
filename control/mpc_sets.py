@@ -13,8 +13,8 @@ F_vrt_lb = np.array([[-0.5, -0.2*np.pi]]).T
 F_vrt_ub = np.array([[0.5,   0.2*np.pi]]).T
 
 W_vrt = Polyhedron(np.eye(2),
-                   ub=np.array([[0.01, 0.001]]).T,
-                   lb=-np.array([[0.01, 0.001]]).T,
+                   ub=np.array([[0.01, 0.002]]).T,
+                   lb=-np.array([[0.01, 0.002]]).T,
                    name='Vertical disturbance set')
 Fset_vrt = Polyhedron(F_vrt, lb=F_vrt_lb, ub=F_vrt_ub, name='Terminal set')
 Yset_vrt = Polyhedron(Y_vrt, lb=Y_vrt_lb, ub=Y_vrt_ub, name='Constraint set')
@@ -45,10 +45,10 @@ F_hrz = np.array([[1, 0,  0,  0,  0, 0, -1,  0,  0,  0,  0],    # deltax
                   [0, 0,  1,  0,  0, 0,  0,  0, -1,  0,  0],    # deltav
                   [0, 0,  0,  0,  1, 0,  0,  0,  0,  0, -1]])   # delta_psi
 
-F_lb = np.array([[-1.5, -2.5, -0.8, -0.3*np.pi]]).T
-F_ub = np.array([[1.5,  2.5,  0.8,  0.3*np.pi]]).T
+F_lb = np.array([[-1.5, -1.5, -0.3, -0.1*np.pi]]).T
+F_ub = np.array([[1.5,  1.5,  0.3,  0.1*np.pi]]).T
 
-w_ub = np.array([[0, 0, 0, 0.01, 0.0001*np.pi, 0,
+w_ub = np.array([[0, 0, 0, 0.03, 0.002*np.pi, 0,
                   0, 0, 0, 0.01, 0.0001*np.pi]]).T
 w_lb = - w_ub
 

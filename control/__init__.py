@@ -1,6 +1,6 @@
 from .MPC import Controller
 from .positioner import Positioner
-from .MPC_osqp import ControllerOSQP,  reachability_matrices
+from .MPC_osqp import ControllerOSQP, ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon, reachability_matrices
 from .PID import ControllerPID
 from .Polyhedron import Polyhedron
 from .dynamical_models import get_vertical_dynamics, get_horizontal_dynamics, get_y_uav, get_y_ugv, get_h_uav

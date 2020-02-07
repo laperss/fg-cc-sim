@@ -7,6 +7,7 @@ from scipy.sparse import csc_matrix, block_diag
 import matplotlib.pyplot as plt
 import utils
 from .Polyhedron import Polyhedron
+import time
 
 
 class ControllerOSQP(object):
@@ -29,6 +30,9 @@ class ControllerOSQP(object):
         self.nt = nt                      # number of terminal constraints
         self.nc = self.ni + self.ne + self.nt  # total number of constraints
 
+        self.x0 = None
+        self.y0 = None
+
         self.cost = np.zeros((self.nz, self.nz))
 
         # The equality matrix:
@@ -41,7 +45,14 @@ class ControllerOSQP(object):
 
         self.set_equality_constraints(A, B)
 
+        self.settings = {'verbose': False,
+                         'time_limit': 0.05, 'eps_abs': 1e-4, 'eps_rel': 1e-4}
+
+        self.optimizer = osqp.OSQP()
+
     def set_cost_matrix(self, Q, R, Qf, F=None, G=None):
+        self.C2 = F
+        self.D2 = G
         if F is not None:
             Q = np.matmul(F.T, np.matmul(Q, F))
             Qf = np.matmul(F.T, np.matmul(Qf, F))
@@ -86,47 +97,23 @@ class ControllerOSQP(object):
 
     def set_inequality_constraints(self, Y):
         print("* Number of inequality constraints = %i" % self.ni)
+        # Initial constraint
+        idxu = np.where(np.any((Y.P @ self.D), axis=1))[0]
+        constr_0 = ((Y.P @ self.D))[idxu]
+        lb_0 = Y.lb[idxu, :]
+        ub_0 = Y.ub[idxu, :]
 
-        if type(Y) == list:  # the constraints are time varying
-            # Initial constriant
-            idxu = np.where(
-                np.any((Y[0].P @ self.D), axis=1))[0]
-            constr_0 = (np.matmul(Y[0].P.todense(), self.D))[idxu]
-            lb_0 = Y[0].lb[idxu, :]
-            ub_0 = Y[0].ub[idxu, :]
-
-            # Constraint t=1:N-1
-            temp_Y = Y[1:-1].copy()
-            temp_Y.extend([*[Y[-1]]*(self.N-len(Y)+1)])
-            constr_i = block_diag([(Yi.P @ np.concatenate((self.C,
-                                                           self.D), axis=1)) for Yi in temp_Y])
-            lb_i = np.vstack([Yi.lb for Yi in temp_Y])
-            ub_i = np.vstack([Yi.ub for Yi in temp_Y])
-
-            idxx = np.where(
-                np.any((Y[-1].P @ self.C), axis=1))[0]
-            constr_N = ((Y[-1].P @ self.C))[idxx, :]
-            lb_N = Y[-1].lb[idxx, :]
-            ub_N = Y[-1].ub[idxx, :]
-
-        else:  # the constraints are not time varying
-            # Initial constraint
-            idxu = np.where(np.any((Y.P @ self.D), axis=1))[0]
-            constr_0 = ((Y.P @ self.D))[idxu]
-            lb_0 = Y.lb[idxu, :]
-            ub_0 = Y.ub[idxu, :]
-
-            # Constraint t=1:N-1
-            ub_i = np.tile(Y.ub, (self.N-1, 1))
-            lb_i = np.tile(Y.lb, (self.N-1, 1))
-            constr_i = scipy.sparse.kron(np.eye(self.N-1),
-                                         (Y.P @ np.concatenate((self.C,
-                                                                self.D), axis=1)), format='csc')
-            # Terminal constraint
-            idxx = np.where(np.any((Y.P @ self.C), axis=1))[0]
-            constr_N = ((Y.P @ self.C))[idxx, :]
-            lb_N = Y.lb[idxx, :]
-            ub_N = Y.ub[idxx, :]
+        # Constraint t=1:N-1
+        ub_i = np.tile(Y.ub, (self.N-1, 1))
+        lb_i = np.tile(Y.lb, (self.N-1, 1))
+        constr_i = scipy.sparse.kron(np.eye(self.N-1),
+                                     (Y.P @ np.concatenate((self.C,
+                                                            self.D), axis=1)), format='csc')
+        # Terminal constraint
+        idxx = np.where(np.any((Y.P @ self.C), axis=1))[0]
+        constr_N = ((Y.P @ self.C))[idxx, :]
+        lb_N = Y.lb[idxx, :]
+        ub_N = Y.ub[idxx, :]
 
         ineq_A = block_diag(
             [constr_0, constr_i.todense(), constr_N], format='csc')
@@ -140,21 +127,11 @@ class ControllerOSQP(object):
 
     def set_terminal_constraint(self, F):
         print("* Number of terminal constraints = %i" % self.nt)
+        print("N = ", self.N)
 
-        # If time varying terminal set, use the one corresponding to correct N
-        if type(F) == list:
-            if len(F) < self.N:
-                Xf = F[-1].P.todense()
-                xl = F[-1].lb
-                xu = F[-1].ub
-            else:
-                Xf = F[self.N].P.todense()
-                xl = F[self.N].lb
-                xu = F[self.N].ub
-        else:
-            Xf = F.P.todense()
-            xl = F.lb
-            xu = F.ub
+        Xf = F.P.todense()
+        xl = F.lb
+        xu = F.ub
 
         ineq_A = np.zeros((self.nt, self.nz))
         ineq_l = np.zeros((self.nt, 1))
@@ -170,35 +147,73 @@ class ControllerOSQP(object):
         self.ineq_l[self.ne+self.ni:self.ne+self.ni+self.nt, :] = ineq_l
         self.ineq_u[self.ne+self.ni:self.ne+self.ni+self.nt, :] = ineq_u
 
-    def to_sparse(self):
+    def setup_problems(self):
         self.ineq_A = csc_matrix(self.ineq_A)
+        self.optimizer.setup(P=self.cost, q=np.zeros((self.nz, 1)),
+                             A=self.ineq_A, l=self.ineq_l, u=self.ineq_u, **self.settings)
+        res = self.optimizer.solve()
 
-    def solve(self, x0, lb=None, u0=[0, 0, 0, 0], distance=None):
-        x0 = np.array([x0]).T
-        hrz_prob = osqp.OSQP()
+    def solve(self, x0, lb=None, u0=[0, 0, 0, 0], distance=None, k=0):
 
-        settings = {'verbose': False, 'time_limit': 0.05, 'eps_abs': 0.005}
-        # Set initial constraint
+        # x0 = np.array([x0]).T
+        Ax0 = np.matmul(self.A, np.array([x0]).T)
+        # print("x0 = ", Ax0.T)
 
-        if lb is None:
-            self.ineq_l[0: self.nx] = np.matmul(self.A, x0)
-            self.ineq_u[0: self.nx] = np.matmul(self.A, x0)
-            hrz_prob.setup(P=self.cost, q=np.zeros((self.nz, 1)),
-                           A=self.ineq_A, l=self.ineq_l, u=self.ineq_u, **settings)
+        if k > 0:
+            if lb is None:
+                start = time.time()
+                lb = self.ineq_l.copy()
+                ub = self.ineq_u.copy()
+                lb[0: k * self.nx] = np.zeros((k*self.nx, 1))
+                ub[0: k * self.nx] = np.zeros((k*self.nx, 1))
+                lb[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
+                ub[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
+
+                lb[k*self.nx: k*self.nx + self.nx] = Ax0
+                ub[k*self.nx: k*self.nx + self.nx] = Ax0
+                self.optimizer.update(l=lb, u=ub)
+                print("UPDATE TIME = ", time.time() - start)
+                # print(lb[self.ne:])
+                # print(ub[self.ne:])
+
+            else:
+                lb[0: k] = np.zeros(k)
+                ub = self.ineq_u.copy()
+                lb[0: k * self.nx] = np.zeros((k*self.nx, 1))
+                ub[0: k * self.nx] = np.zeros((k*self.nx, 1))
+                lb[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
+                ub[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
+
+                lb[k: k + self.nx] = Ax0
+                ub[k: k + self.nx] = Ax0
+
+                self.optimizer.update(l=lb, u=ub)
+
         else:
-            lb[0: self.nx] = np.matmul(self.A, x0)
-            self.ineq_u[0: self.nx] = np.matmul(self.A, x0)
+            if lb is None:
+                self.ineq_l[0: self.nx] = Ax0
+                self.ineq_u[0: self.nx] = Ax0
 
-            hrz_prob.setup(P=self.cost, q=np.zeros((self.nz, 1)),
-                           A=self.ineq_A, l=lb, u=self.ineq_u, **settings)
+                self.optimizer.update(l=self.ineq_l, u=self.ineq_u)
+            else:
+                lb[0: self.nx] = Ax0
+                self.ineq_u[0: self.nx] = Ax0
 
-        res = hrz_prob.solve()
+                self.optimizer.update(l=lb, u=self.ineq_u)
 
+        start = time.time()
+
+        res = self.optimizer.solve()
+        print("SOLUTION TIME  ", self.nx,  time.time() - start)
         if (res.info.status_val == 1 or res.info.status_val == 2):
             pass
         else:
             print("NO ACCURATE SOLUTION FOUND")
-        return res
+
+        self.x0 = res.x
+        self.y0 = res.y
+
+        return res.x, res.info.status_val
 
 
 def reachability_matrices(A, B, C, D, W, Xf, Y0, p, nmax):
@@ -239,6 +254,258 @@ def reachability_matrices(A, B, C, D, W, Xf, Y0, p, nmax):
         Q[i+1].minrep()
 
     return Y, Q
+
+
+class ControllerOSQPRobust(ControllerOSQP):
+    def reachability_matrices(self, W, Xf, Y0, p):
+        """ Compute the worst-case disturbances with a linear feedback.
+        The feedback is nilpotent in p steps.
+
+        Returns: Y = list of state/input constraints
+        Q = list of terminal constriants
+        """
+        K = utils.nilpotent_feedback(self.A, self.B, p)
+
+        Q = [None for i in range(p+1)]  # from 0 to N
+        Y = [None for i in range(p+1)]  # from 0 to N
+        L = [None for i in range(p+1)]  # from 0 to N
+
+        L[0] = np.eye(self.nx)
+        Q[0] = Xf
+        Y[0] = Y0
+
+        for i in range(p):
+
+            L[i+1] = np.matmul((self.A + np.matmul(self.B, K[i])), L[i])
+            q, r = np.linalg.qr(L[i+1])
+            x_to_y = np.matmul((self.C+np.matmul(self.D, K[i])), L[i])
+            Y[i + 1] = Y[i].pontryagin_difference(W.affine_map(x_to_y),
+                                                  name="Y[%i]" % (i+1))
+            Y[i+1].minrep()
+
+            Q[i+1] = Q[i].pontryagin_difference(W.affine_map(L[i], name='W[%i]' % (i)),
+                                                name="Q[%i]" % (i+1))
+            Q[i+1].minrep()
+
+        # self.set_inequality_constraints(Y)
+        # self.set_terminal_constraint(Q)
+        return Y, Q
+
+    def set_inequality_constraints(self, Y):
+        print("* Number of inequality constraints = %i" % self.ni)
+        # Initial constriant
+        idxu = np.where(
+            np.any((Y[0].P @ self.D), axis=1))[0]
+        constr_0 = (np.matmul(Y[0].P.todense(), self.D))[idxu]
+        lb_0 = Y[0].lb[idxu, :]
+        ub_0 = Y[0].ub[idxu, :]
+
+        # Constraint t=1:N-1
+        temp_Y = Y[1:-1].copy()
+        temp_Y.extend([*[Y[-1]]*(self.N-len(Y)+1)])
+        constr_i = block_diag([(Yi.P @ np.concatenate((self.C,
+                                                       self.D), axis=1)) for Yi in temp_Y])
+        lb_i = np.vstack([Yi.lb for Yi in temp_Y])
+        ub_i = np.vstack([Yi.ub for Yi in temp_Y])
+
+        idxx = np.where(
+            np.any((Y[-1].P @ self.C), axis=1))[0]
+        constr_N = ((Y[-1].P @ self.C))[idxx, :]
+        lb_N = Y[-1].lb[idxx, :]
+        ub_N = Y[-1].ub[idxx, :]
+
+        ineq_A = block_diag(
+            [constr_0, constr_i.todense(), constr_N], format='csc')
+
+        lb = np.vstack([lb_0, lb_i, lb_N])
+        ub = np.vstack([ub_0, ub_i, ub_N])
+
+        self.ineq_A[self.ne:self.ne+self.ni, :] = ineq_A.todense()
+        self.ineq_l[self.ne:self.ne+self.ni, :] = lb
+        self.ineq_u[self.ne:self.ne+self.ni, :] = ub
+
+    def set_terminal_constraint(self, F):
+        print("* Number of terminal constraints = %i" % self.nt)
+        self.F = F
+
+        if type(F) != list:
+            raise TypeError("F must be a list of sets.")
+
+        if len(F) < self.N:
+            F = F[-1]
+        else:
+            F = F[self.N]
+
+        super().set_terminal_constraint(F)
+
+
+class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
+    def __init__(self, A, B, C, D, N, ds, nt=0):
+        super().__init__(A, B, C, D, N, ds, nt)
+        print("N = ", self.N)
+        self.N0 = int(self.N/2)
+        print("N = ", self.N)
+        print("N0 = ", self.N0)
+
+    def solve_N2(self, x0, N=0, lb=None):
+        print("SOLVE N = ", N)
+        Ax0 = np.matmul(self.A, np.array([x0]).T)
+
+        nz = N*(self.nx + self.nu)
+        neq = N*(self.nx + self.ny) + self.nt
+
+        start = time.time()
+
+        start = time.time()
+        lb = np.zeros_like(self.ineq_l)
+        ub = np.zeros_like(self.ineq_l)
+
+        ineq_idx = [i for i in range(0, N*(self.nx))] + \
+                   [self.ne + i for i in range(0, N*self.ny+self.nt)]
+
+        lb[(self.N-N)*self.nx:self.N*self.nx, 0] = self.ineq_l[0:N*self.nx, 0]
+
+        ub[(self.N-N)*self.nx:self.N*self.nx, 0] = self.ineq_u[0:N*self.nx, 0]
+
+        lb[self.ne+(self.N-N)*self.ny:self.ne+self.N*self.ny,
+           0] = self.ineq_l[self.ne:self.ne+N*self.ny, 0]
+
+        ub[self.ne+(self.N-N)*self.ny:self.ne+self.N*self.ny,
+           0] = self.ineq_u[self.ne:self.ne+N*self.ny, 0]
+
+        lb[self.ne+self.ni:, 0] = self.ineq_l[self.ne+self.ni:, 0]
+
+        ub[self.ne+(self.N-N)*self.ny:self.ne+self.N*self.ny,
+           0] = self.ineq_u[self.ne:self.ne+N*self.ny, 0]
+
+        lb[(self.N-N)*self.nx: (self.N-N)*self.nx + self.nx] = Ax0
+        ub[(self.N-N)*self.nx: (self.N-N)*self.nx + self.nx] = Ax0
+
+        self.optimizer.update(l=lb, u=ub)
+        print("UPDATE TIME = ", time.time() - start)
+
+        self.optimizer.update(l=lb, u=ub)
+
+        start = time.time()
+
+        res = self.optimizer.solve()
+        print("SOLUTION TIME  ", self.nx,  time.time() - start)
+        if (res.info.status_val == 1 or res.info.status_val == 2):
+            pass
+        else:
+            print("NO ACCURATE SOLUTION FOUND")
+
+        return res
+
+    def solve_N(self, x0, N):
+        Ax0 = np.matmul(self.A, np.array([x0]).T)
+
+        nz = N*(self.nx + self.nu)
+        neq = N*(self.nx + self.ny) + self.nt
+
+        start = time.time()
+        optimizer = osqp.OSQP()
+
+        var_idx_cost = [i for i in range(0, nz-self.nx)] + \
+            [self.nz - self.nx + i for i in range(self.nx)]
+        var_idx = [i for i in range(0, nz)]
+
+        ineq_idx = [i for i in range(0, N*(self.nx))] + \
+            [self.ne + i for i in range(0, N*self.ny+self.nt)]
+
+        cost = self.cost[:, var_idx_cost][var_idx_cost, :]
+        ineq = self.ineq_A[:, var_idx][ineq_idx, :]
+        lb = self.ineq_l[ineq_idx, :]
+        ub = self.ineq_u[ineq_idx, :]
+
+        if len(self.F) <= N:
+            F = self.F[-1]
+        else:
+            F = self.F[N]
+
+        ineq[-self.nt:, -self.nx:] = F.P
+        lb[-self.nt:, :] = F.lb
+        ub[-self.nt:, :] = F.ub
+
+        lb[0: self.nx] = Ax0
+        ub[0: self.nx] = Ax0
+
+        optimizer.setup(P=cost, q=np.zeros((nz, 1)),
+                        A=ineq, l=lb, u=ub, **self.settings)
+        # if self.x0 is not None:
+        #    if self.N_old >= N:
+        #        x0 = self.x0[0:nz]
+        #        optimizer.warm_start(x=x0)
+        #    else:
+        #        x0 = np.pad(self.x0, (0, (N-self.N_old)
+        #                              * (self.nx+self.nu)))
+        #        optimizer.warm_start(x=x0)
+
+        res = optimizer.solve()
+
+        # if res.info.status_val == 1:
+        #    for i in range(1, 3):
+        #        xu = res.x[(self.nx + self.nu)*(N-i) +
+        #                   self.nu:(self.nx + self.nu)*(N-i+1)].reshape((self.nx, 1))
+        #        hej = self.F[0].A @ xu
+        #        print(sum(hej <= self.F[0].b) == self.nt*2)
+
+        # print("result")
+        #print(sum(np.matmul(self.C2, np.array([xu[self.nu:]]).T).T))
+
+        # self.x0 = res.x
+        # self.y0 = res.y
+        # self.N_old = N
+
+        return res
+
+    def initial_solve(self, x0):
+        self.solve(x0, 1.5)
+
+    def solve(self, x0, time_limit=0.06, dN=1):
+        init_time = time.time()
+        N = max(self.N0-1, 5)
+        res = self.solve_N(x0, N)
+
+        if (res.info.status_val == 1):
+            if N > 5:
+                cmin = res.info.obj_val + N
+                print("* Attempt to decrease horizon from %i, value = %f" %
+                      (N, cmin))
+                # If feasible, try smaller
+                while time.time() - init_time < time_limit and N > 5:
+                    N -= dN
+                    res = self.solve_N(x0, N)
+                    if (res.info.status_val == 1):
+                        if res.info.obj_val + N < cmin:
+                            print("* FOUND LOWER VALUE: %f < %f" %
+                                  (res.info.obj_val, cmin))
+                            cmin = res.info.obj_val + N
+
+                        else:
+                            print("* Decrease to %i does not lower cost: %f > %f"
+                                  % (N, res.info.obj_val+N, cmin))
+                            N += 1
+                            break
+                    else:
+                        print("* Decrease not feasible")
+                        N += 1
+                        break
+                print("* Recompute with N = %i" % N)
+                res = self.solve_N(x0, N)
+
+        else:
+            print("* Have to increase horizon")
+            feasible = False
+            while not feasible and N <= self.N and time.time() - init_time < time_limit:
+                print("Solve with N = ", N)
+                N += 1
+                res = self.solve_N(x0, N)
+                if (res.info.status_val == 1):
+                    feasible = True
+
+        self.N0 = N
+        return res.info.status_val, res.x[-N*(self.nx+self.nu):], N
 
 
 if __name__ == "__main__":
@@ -293,12 +560,12 @@ if __name__ == "__main__":
     hrz_idx = np.arange(0, nx, dim)
     vrt_idx = np.arange(1, nx, dim)
 
-    Phi = np.eye(nx)*Ts + \
-        (np.linalg.matrix_power(A, 2)*Ts**2)/2 + \
-        (np.linalg.matrix_power(A, 2)*Ts**3)/6 + \
-        (np.linalg.matrix_power(A, 3)*Ts**4)/24
-    A = np.eye(nx) + np.matmul(A, Phi)
-    B = np.matmul(Phi, B)
+    # Phi = np.eye(nx)*Ts +
+    #    (np.linalg.matrix_power(A, 2)*Ts**2)/2 +
+    #    (np.linalg.matrix_power(A, 2)*Ts**3)/6 +
+    #    (np.linalg.matrix_power(A, 3)*Ts**4)/24
+    #A = np.eye(nx) + np.matmul(A, Phi)
+    #B = np.matmul(Phi, B)
 
     A_hrz = A[hrz_idx, :][:, hrz_idx]
     B_hrz = B[hrz_idx, None,  0]
@@ -377,7 +644,7 @@ if __name__ == "__main__":
     ctrl.set_cost_matrix(Q_hrz, R_hrz, Qf_hrz)
     ctrl.set_inequality_constraints(Yall)
     ctrl.set_terminal_constraint(Qall)
-    ctrl.to_sparse()
+    ctrl.setup_problems()
 
     Fset = Polyhedron(F_vrt[0], b=F_vrt[1], name='Terminal set')
     Yset = Polyhedron(Y_vrt[0], lb=Y_vrt[1],
@@ -391,7 +658,7 @@ if __name__ == "__main__":
 
     ctrl_vrt.set_inequality_constraints(Yall)
     ctrl_vrt.set_terminal_constraint(Qall)
-    ctrl_vrt.to_sparse()
+    ctrl_vrt.setup_problems()
 
     res = ctrl.solve(x0[[0, 2, 4], :])
     u = res.x[np.arange(0, 4*N, 4)]
@@ -405,7 +672,7 @@ if __name__ == "__main__":
 
     lower_bound = ctrl_vrt.ineq_l.copy()
 
-    lower_bound[ctrl_vrt.ne:ctrl_vrt.ni+ctrl_vrt.ne] *= scaling
+    lower_bound[ctrl_vrt.ne: ctrl_vrt.ni+ctrl_vrt.ne] *= scaling
     res = ctrl_vrt.solve(x0[[1, 3, 5], :], lower_bound)
 
     u = res.x[np.arange(0, 4*N, 4)]

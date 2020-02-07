@@ -16,7 +16,8 @@ import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from fgpython import SimulationGUI, FGTelnetConnection
-from control import Positioner, ControllerOSQP, ControllerPID, reachability_matrices, Polyhedron, Kalman
+from control import Positioner, ControllerOSQP, ControllerPID,  Kalman
+from control import ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon
 from control import get_horizontal_dynamics, get_vertical_dynamics
 from control import get_y_ugv, get_y_uav, get_h_uav
 from control import Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt
@@ -99,10 +100,10 @@ class MainSimulation(object):
     count = 0
 
     def __init__(self):
-        self.ds = 0.15
-        self.N = 200
+        self.ds = 0.1
+        self.Nmax = 300
         self.update_rate = 100
-        self.N_data = 700
+        self.N_data = 1000
         self.v_ref = 20  # m/s
 
         self.PID = ControllerPID(self.v_ref, 0.1, 0.1, 0.05, 0.1)
@@ -113,6 +114,8 @@ class MainSimulation(object):
         self.ugv_data = np.zeros((self.N_data, 7))*np.NaN
         self.uav_data = np.zeros((self.N_data, 11))*np.NaN
         self.time = np.zeros((self.N_data))*np.NaN
+        self.solve_time = []
+        self.solve_horizon = []
 
         A_c_vrt, B_c_vrt, C_vrt, D_vrt = get_vertical_dynamics()
         A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz = get_horizontal_dynamics(
@@ -129,10 +132,11 @@ class MainSimulation(object):
 
         nx = A_c.shape[0]
         nu = B_c.shape[1]
-        self.nz = nx + nu
+        self.nvar = nx + nu
+
         ny = C_hrz.shape[0]
-        np.set_printoptions(precision=3, linewidth=250,
-                            edgeitems=8, suppress=True)
+        np.set_printoptions(precision=3, linewidth=210, threshold=2000,
+                            edgeitems=15, suppress=True)
 
         Phi = np.eye(nx)*self.ds + \
             (np.linalg.matrix_power(A_c, 1)*self.ds**2)/2 + \
@@ -148,25 +152,24 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
-        self.mpc_hrz = ControllerOSQP(
-            A_hrz, B_hrz, C_hrz, D_hrz, self.N, self.ds, 4)
+        self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
+            A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 4)
 
-        self.mpc_vrt = ControllerOSQP(
-            A_vrt, B_vrt, C_vrt, D_vrt, self.N, self.ds, 2)
+        self.mpc_vrt = ControllerOSQPRobust(
+            A_vrt, B_vrt, C_vrt, D_vrt, self.Nmax, self.ds, 2)
 
-        Y, Q = reachability_matrices(
-            A_hrz, B_hrz, C_hrz, D_hrz, W, Fset, Yset, 22, 50)
-        self.mpc_hrz.set_cost_matrix(Q_hrz, R_hrz, Q_hrz, H_hrz, G_hrz)
+        Y, Q = self.mpc_hrz.reachability_matrices(W, Fset, Yset, 25)
+        self.mpc_hrz.set_cost_matrix(Q_hrz, R_hrz, Q_hrz*10, H_hrz, G_hrz)
         self.mpc_hrz.set_inequality_constraints(Y)
         self.mpc_hrz.set_terminal_constraint(Q)
-        self.mpc_hrz.to_sparse()
+        self.mpc_hrz.setup_problems()
 
-        Y, Q = reachability_matrices(
-            A_vrt, B_vrt, C_vrt, D_vrt, W_vrt, Fset_vrt, Yset_vrt, 22, 50)
+        Y, Q = self.mpc_vrt.reachability_matrices(
+            W_vrt, Fset_vrt, Yset_vrt, 20)
         self.mpc_vrt.set_cost_matrix(Q_vrt, R_vrt, Q_vrt)
         self.mpc_vrt.set_inequality_constraints(Y)
         self.mpc_vrt.set_terminal_constraint(Q)
-        self.mpc_vrt.to_sparse()
+        self.mpc_vrt.setup_problems()
 
         self.init_time = time.time()
 
@@ -193,7 +196,7 @@ class MainSimulation(object):
 
         if self.ap_mode != 'HOLD':
             self.update_state()
-            if self.count == 5:
+            if self.count == 10:
                 self.compute_control()
                 self.count = 0
             else:
@@ -218,9 +221,9 @@ class MainSimulation(object):
         if self.final_stage:
             self.compute_mpc(state, input_)
         else:
-            self.compute_pid()
+            self.compute_pid(state)
 
-    def compute_pid(self):
+    def compute_pid(self, state):
         """ Computes control inputs that will drive the system to the final stage.
             Inputs: state_t The state at time t """
         deltax = self.uav_state[0, 0] - self.ugv_state[0, 0]
@@ -235,19 +238,11 @@ class MainSimulation(object):
         uav_ctrl.setpoint.v_ref = max(min(28.0, v_uav), 18.0)     # [m/s]
         ugv_ctrl.setpoint.v_ref = max(min(30.0, v_ugv), 0)     # [m/s]
 
-        x = np.array([deltax, deltay,
-                      self.uav_state[3, 0],
-                      self.uav_state[4, 0],
-                      self.uav_state[6, 0],
-                      self.ugv_state[2, 0],
-                      self.ugv_state[3, 0],
-                      self.ugv_state[4, 0]])[np.newaxis].T
-
-        ans = not False in np.less_equal(np.dot(A, x), b)
-        if (ans):
+        if abs(deltax) < 35:
             uav_.landing_mode()
             ugv_.landing_mode()
             self.final_stage = True
+            self.mpc_hrz.initial_solve(state)
 
     def compute_mpc(self, state_t, input_t):
         """ Computes the optimal path for the final stage of the landing
@@ -258,46 +253,82 @@ class MainSimulation(object):
         # Save the past 4 UAV heading inputs
         start_time = time.time()
 
-        res = self.mpc_hrz.solve(state_t)
+        if False:
+            res = self.mpc_hrz.solve(state_t)
 
-        u0 = res.x[0]  # Thrust UAV
-        u1 = res.x[1]  # Steering UAV
-        u2 = res.x[2]  # Thrust UGV
-        u3 = res.x[3]  # Steering UGV
+            u0 = res.x[0]  # Thrust UAV
+            u1 = res.x[1]  # Steering UAV
+            u2 = res.x[2]  # Thrust UGV
+            u3 = res.x[3]  # Steering UGV
 
-        x1 = res.x[np.arange(4, self.nz*self.N, self.nz)]
-        y1 = res.x[np.arange(5, self.nz*self.N, self.nz)]
-        v1 = res.x[np.arange(6, self.nz*self.N, self.nz)]
-        x2 = res.x[np.arange(10, self.nz*self.N, self.nz)]
-        y2 = res.x[np.arange(11, self.nz*self.N, self.nz)]
-        v2 = res.x[np.arange(12, self.nz*self.N, self.nz)]
+            x1 = res.x[np.arange(4, self.nvar*self.Nmax, self.nvar)]
+            y1 = res.x[np.arange(5, self.nvar*self.Nmax, self.nvar)]
+            v1 = res.x[np.arange(6, self.nvar*self.Nmax, self.nvar)]
+            x2 = res.x[np.arange(10, self.nvar*self.Nmax, self.nvar)]
+            y2 = res.x[np.arange(11, self.nvar*self.Nmax, self.nvar)]
+            v2 = res.x[np.arange(12, self.nvar*self.Nmax, self.nvar)]
 
-        # inputs = self.mpc.u[:, 1].value
+            distance = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
+                                 for i in range(len(x1))])
+
+            scaling = np.ones((self.mpc_vrt.ni, 1))
+            scaling[np.arange(1, self.mpc_vrt.ni, self.mpc_vrt.ny), 0] = np.maximum(
+                np.minimum((self.h_s * distance - self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s), -0.01)
+
+            lower_bound = self.mpc_vrt.ineq_l.copy()
+            lower_bound[self.mpc_vrt.ne:self.mpc_vrt.ni +
+                        self.mpc_vrt.ne] *= scaling
+
+            print("1 deltax = ", x1[0:20] - x2[0:20])
+
+        else:
+            status, path, N = self.mpc_hrz.solve(state_t)
+            #N = self.Nmax
+
+            x1 = path[np.arange(4, N*self.nvar, self.nvar)]
+            x2 = path[np.arange(10, N*self.nvar, self.nvar)]
+            y1 = path[np.arange(5, N*self.nvar, self.nvar)]
+            y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+            u0 = path[0]
+            u1 = path[1]
+            u2 = path[2]
+            u3 = path[3]
+
+            dist = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
+                             for i in range(len(x1))])
+
+            scale = np.ones((self.mpc_vrt.ni, 1))
+            scale[np.arange(1, N*self.mpc_vrt.ny,
+                            self.mpc_vrt.ny), 0] = np.maximum(
+                                np.minimum((self.h_s * dist -
+                                            self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
+                                -0.01)
+
+            scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
+                  0] = np.ones(((self.Nmax-N)))*-0.01
+
+            lower_bound = self.mpc_vrt.ineq_l.copy()
+            lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
+                        self.mpc_vrt.ne] *= scale
+
+            print("SOLVER = %i, N = %i" % (status, N))
+            print("1 deltax = ", x1[0:20] - x2[0:20])
+
         uav_ctrl.setpoint.a_ref = u0  # [m/s2]
         ugv_ctrl.setpoint.a_ref = u2  # [m/s2]
         uav_ctrl.setpoint.psi_ref = u1  # [rad/s]
         ugv_ctrl.setpoint.psi_ref = u3  # [rad/s]
 
-        distance = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
-                             for i in range(len(x1))])
-
-        scaling = np.ones((self.mpc_vrt.ni, 1))
-        scaling[np.arange(1, self.mpc_vrt.ni, self.mpc_vrt.ny), 0] = np.maximum(
-            np.minimum((self.h_s * distance - self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s), -0.01)
-
-        lower_bound = self.mpc_vrt.ineq_l.copy()
-        lower_bound[self.mpc_vrt.ne:self.mpc_vrt.ni+self.mpc_vrt.ne] *= scaling
-
         try:
-            result_vrt = self.mpc_vrt.solve(
+            path_vrt, status = self.mpc_vrt.solve(
                 np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T, lower_bound)
-            u0_vrt = result_vrt.x[0]
-            h0 = result_vrt.x[np.arange(1, 3*self.N, 3)]
-            g0 = result_vrt.x[np.arange(2, 3*self.N, 3)]
+            u0_vrt = path_vrt[0]
+            h0 = path_vrt[np.arange(1, 3*self.Nmax, 3)]
+            g0 = path_vrt[np.arange(2, 3*self.Nmax, 3)]
             uav_ctrl.setpoint.gamma_ref = u0_vrt
 
         except:
-            print("Could not solve vertical...: ", result_vrt.info.status)
+            print("Could not solve vertical...: ", status)
             print("state = ", np.array(
                 [[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]))
             u0_vrt = 0.0
@@ -305,13 +336,14 @@ class MainSimulation(object):
             # print("SCALING = ", scaling[1:3:])
 
         self.last_input = np.array([[u0, u1, u2, u3, u0_vrt]]).T
-        print("time: ", time.time()-start_time)
-        #self.mpc_vrt.update_equality_constraints(0, 1, v1*self.hparam_uav)
+        self.solve_time.append(time.time()-start_time)
+        self.solve_horizon.append(N)
+        # self.mpc_vrt.update_equality_constraints(0, 1, v1*self.hparam_uav)
 
-        #self.mpc_hrz.update_equality_constraints(1, 4, v1*self.yparam_uav[0])
-        #self.mpc_hrz.update_equality_constraints(1, 5, v1*self.yparam_uav[1])
+        # self.mpc_hrz.update_equality_constraints(1, 4, v1*self.yparam_uav[0])
+        # self.mpc_hrz.update_equality_constraints(1, 5, v1*self.yparam_uav[1])
 
-        #self.mpc_hrz.update_equality_constraints(7, 10, v2*self.yparam_ugv)
+        # self.mpc_hrz.update_equality_constraints(7, 10, v2*self.yparam_ugv)
 
     def send_command(self, vehicle):
         """ Send command to control system of vehicle. """
@@ -495,14 +527,16 @@ app.exec_()
 
 
 if sim.itr > sim.N_data:
+    print("More data than maximum")
     sim.uav_data = np.roll(
-        sim.uav_data, -(sim.itr % sim.N_data+1), axis=0)
+        sim.uav_data, -(sim.itr % sim.N_data), axis=0)
     sim.ugv_data = np.roll(
-        sim.ugv_data, -(sim.itr % sim.N_data+1), axis=0)
+        sim.ugv_data, -(sim.itr % sim.N_data), axis=0)
     sim.time = np.roll(
-        sim.time, -(sim.itr % sim.N_data+1), axis=0)
+        sim.time, -(sim.itr % sim.N_data), axis=0)
     t1 = sim.time[-1]
 else:
+    print("less data than maximum")
     t1 = sim.time[sim.itr-1]
 
 
@@ -597,4 +631,26 @@ if sim.itr > 0:
     plt.subplots_adjust(left=None, bottom=None, right=None,
                         top=None, wspace=None, hspace=0.4)
 
+    fig, ax1 = plt.subplots()
+    ax1.plot(sim.solve_time, color='blue')
+    ax1.set_ylabel('Solver time', color='blue')
+    ax1.tick_params(axis='y', labelcolor='blue')
+    ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+    ax2.plot(sim.solve_horizon, color='green')
+    ax2.set_ylabel('Horizon', color='green')
+    ax2.tick_params(axis='y', labelcolor='green')
+
+    plt.title("MPC solve time")
+    fig.tight_layout()  # otherwise the right y-label is slightly clipped
     plt.show()
+
+now = datetime.now()  # current date and time
+date_time = now.strftime("%y%m%d_%H-%M-%S")
+print("date and time:", date_time)
+
+np.savetxt("uav" + date_time + ".csv", sim.uav_data, delimiter=",")
+np.savetxt("ugv" + date_time + ".csv", sim.ugv_data, delimiter=",")
+np.savetxt("time" + date_time + ".csv", sim.time, delimiter=",")
+
+solver = np.array([sim.solve_horizon, sim.solve_time]).T
+np.savetxt("solver" + date_time + ".csv", solver, delimiter=",")
