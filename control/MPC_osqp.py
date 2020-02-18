@@ -33,6 +33,10 @@ class ControllerOSQP(object):
         self.x0 = None
         self.y0 = None
 
+        self.cmin_last = 0
+        self.cmin_pred = 0
+        self.xpred = np.zeros((self.nx, 1))
+
         self.cost = np.zeros((self.nz, self.nz))
 
         # The equality matrix:
@@ -46,13 +50,11 @@ class ControllerOSQP(object):
         self.set_equality_constraints(A, B)
 
         self.settings = {'verbose': False,
-                         'time_limit': 0.05, 'eps_abs': 1e-4, 'eps_rel': 1e-4}
+                         'time_limit': 0.08, 'eps_abs': 1e-5, 'eps_rel': 1e-5}
 
         self.optimizer = osqp.OSQP()
 
-    def set_cost_matrix(self, Q, R, Qf, F=None, G=None):
-        self.C2 = F
-        self.D2 = G
+    def set_cost_matrix(self, Q, R, Qf, F=None, G=None, q=None, r=None, qf=None):
         if F is not None:
             Q = np.matmul(F.T, np.matmul(Q, F))
             Qf = np.matmul(F.T, np.matmul(Qf, F))
@@ -60,11 +62,41 @@ class ControllerOSQP(object):
         if G is not None:
             R = np.matmul(G.T, np.matmul(R, G))
 
-        if self.N > 1:
-            for i in range(1, self.N):
-                cost = block_diag([R, scipy.sparse.kron(scipy.sparse.eye(self.N-1),
-                                                        block_diag([Q, R])), Qf], format='csc')
+        if q is None:
+            print("No linear state cost given")
+            q = np.zeros((self.nx, 1))
+        if qf is None:
+            qf = q
+        if r is None:
+            print("No linear input cost given")
+            r = np.zeros((self.nu, 1))
+
+        self.Q0 = Q
+        self.R0 = R
+        cost = block_diag([R, scipy.sparse.kron(scipy.sparse.eye(self.N-1),
+                                                block_diag([Q, R])), Qf], format='csc')
+
+        print(Q)
+
+        print(q)
+
+        print(R)
+        print(r)
+        cost_linear = np.vstack((r,
+                                 (np.tile(np.concatenate((q, r), axis=0), (self.N-1, 1))),
+                                 qf))
+
         self.cost = cost
+        self.cost_linear = cost_linear
+
+    def add_cross_terms(self, i, j):
+        cost = self.cost
+
+        for i in range(self.N-1):
+
+        print(cost)
+
+        ahas
 
     def set_equality_constraints(self, A, B):
         ineq_A = np.zeros((self.ne, self.nz))
@@ -149,71 +181,43 @@ class ControllerOSQP(object):
 
     def setup_problems(self):
         self.ineq_A = csc_matrix(self.ineq_A)
-        self.optimizer.setup(P=self.cost, q=np.zeros((self.nz, 1)),
+        self.optimizer.setup(P=self.cost, q=self.cost_linear,
                              A=self.ineq_A, l=self.ineq_l, u=self.ineq_u, **self.settings)
         res = self.optimizer.solve()
 
-    def solve(self, x0, lb=None, u0=[0, 0, 0, 0], distance=None, k=0):
+    def initial_solve(self, x0, lb=None, time_limit=0.1):
+        status, path, N, c = self.solve(x0, lb=lb)
+        return status, path, N, c
+
+    def solve(self, x0, lb=None, u0=[0, 0, 0, 0], distance=None, time_limit=0.1, k=0):
 
         # x0 = np.array([x0]).T
         Ax0 = np.matmul(self.A, np.array([x0]).T)
         # print("x0 = ", Ax0.T)
 
-        if k > 0:
-            if lb is None:
-                start = time.time()
-                lb = self.ineq_l.copy()
-                ub = self.ineq_u.copy()
-                lb[0: k * self.nx] = np.zeros((k*self.nx, 1))
-                ub[0: k * self.nx] = np.zeros((k*self.nx, 1))
-                lb[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
-                ub[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
+        if lb is None:
+            self.ineq_l[0: self.nx] = Ax0
+            self.ineq_u[0: self.nx] = Ax0
 
-                lb[k*self.nx: k*self.nx + self.nx] = Ax0
-                ub[k*self.nx: k*self.nx + self.nx] = Ax0
-                self.optimizer.update(l=lb, u=ub)
-                print("UPDATE TIME = ", time.time() - start)
-                # print(lb[self.ne:])
-                # print(ub[self.ne:])
-
-            else:
-                lb[0: k] = np.zeros(k)
-                ub = self.ineq_u.copy()
-                lb[0: k * self.nx] = np.zeros((k*self.nx, 1))
-                ub[0: k * self.nx] = np.zeros((k*self.nx, 1))
-                lb[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
-                ub[self.ne: self.ne+k * self.ny] = np.zeros((k*self.ny, 1))
-
-                lb[k: k + self.nx] = Ax0
-                ub[k: k + self.nx] = Ax0
-
-                self.optimizer.update(l=lb, u=ub)
-
+            self.optimizer.update(l=self.ineq_l, u=self.ineq_u)
         else:
-            if lb is None:
-                self.ineq_l[0: self.nx] = Ax0
-                self.ineq_u[0: self.nx] = Ax0
+            lb[0: self.nx] = Ax0
+            self.ineq_u[0: self.nx] = Ax0
 
-                self.optimizer.update(l=self.ineq_l, u=self.ineq_u)
-            else:
-                lb[0: self.nx] = Ax0
-                self.ineq_u[0: self.nx] = Ax0
-
-                self.optimizer.update(l=lb, u=self.ineq_u)
+            self.optimizer.update(l=lb, u=self.ineq_u)
 
         start = time.time()
 
         res = self.optimizer.solve()
         print("SOLUTION TIME  ", self.nx,  time.time() - start)
-        if (res.info.status_val == 1 or res.info.status_val == 2):
+        if (res.info.status_val == 1):
             pass
         else:
-            print("NO ACCURATE SOLUTION FOUND")
+            print("NO ACCURATE SOLUTION FOUND: ", res.info.status_val)
 
         self.x0 = res.x
-        self.y0 = res.y
 
-        return res.x, res.info.status_val
+        return res.info.status_val, res.x, self.N, res.info.obj_val
 
 
 def reachability_matrices(A, B, C, D, W, Xf, Y0, p, nmax):
@@ -245,6 +249,7 @@ def reachability_matrices(A, B, C, D, W, Xf, Y0, p, nmax):
         L[i+1] = np.matmul((A + np.matmul(B, K[i])), L[i])
         q, r = np.linalg.qr(L[i+1])
         x_to_y = np.matmul((C+np.matmul(D, K[i])), L[i])
+
         Y[i + 1] = Y[i].pontryagin_difference(W.affine_map(x_to_y),
                                               name="Y[%i]" % (i+1))
         Y[i+1].minrep()
@@ -275,6 +280,9 @@ class ControllerOSQPRobust(ControllerOSQP):
         Y[0] = Y0
 
         for i in range(p):
+            print("Y[%i] = " % i)
+            print(Y[i].lb.T)
+            print(Y[i].ub.T)
 
             L[i+1] = np.matmul((self.A + np.matmul(self.B, K[i])), L[i])
             q, r = np.linalg.qr(L[i+1])
@@ -343,7 +351,7 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
     def __init__(self, A, B, C, D, N, ds, nt=0):
         super().__init__(A, B, C, D, N, ds, nt)
         print("N = ", self.N)
-        self.N0 = int(self.N/2)
+        self.N0 = int(self.N/3)
         print("N = ", self.N)
         print("N0 = ", self.N0)
 
@@ -397,7 +405,10 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
 
         return res
 
-    def solve_N(self, x0, N):
+    def solve_N(self, x0, N, lb):
+        if lb is None:
+            lb = self.ineq_l.copy()
+
         Ax0 = np.matmul(self.A, np.array([x0]).T)
 
         nz = N*(self.nx + self.nu)
@@ -415,7 +426,7 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
 
         cost = self.cost[:, var_idx_cost][var_idx_cost, :]
         ineq = self.ineq_A[:, var_idx][ineq_idx, :]
-        lb = self.ineq_l[ineq_idx, :]
+        lb = lb[ineq_idx, :]
         ub = self.ineq_u[ineq_idx, :]
 
         if len(self.F) <= N:
@@ -451,7 +462,6 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
         #        print(sum(hej <= self.F[0].b) == self.nt*2)
 
         # print("result")
-        #print(sum(np.matmul(self.C2, np.array([xu[self.nu:]]).T).T))
 
         # self.x0 = res.x
         # self.y0 = res.y
@@ -459,53 +469,156 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
 
         return res
 
-    def initial_solve(self, x0):
-        self.solve(x0, 1.5)
+    def initial_solve(self, x0, lb=None):
+        status, path, N, c = self.solve(x0, 1.8, lb=lb)
+        return status, path, N, c
 
-    def solve(self, x0, time_limit=0.06, dN=1):
+    def solve(self, x0, time_limit=0.06, dN=1, lb=None):
         init_time = time.time()
-        N = max(self.N0-1, 5)
-        res = self.solve_N(x0, N)
+        N0 = self.N0  # Old value
 
-        if (res.info.status_val == 1):
-            if N > 5:
-                cmin = res.info.obj_val + N
-                print("* Attempt to decrease horizon from %i, value = %f" %
-                      (N, cmin))
-                # If feasible, try smaller
-                while time.time() - init_time < time_limit and N > 5:
-                    N -= dN
-                    res = self.solve_N(x0, N)
-                    if (res.info.status_val == 1):
-                        if res.info.obj_val + N < cmin:
-                            print("* FOUND LOWER VALUE: %f < %f" %
-                                  (res.info.obj_val, cmin))
-                            cmin = res.info.obj_val + N
+        N1 = max(self.N0-1, 3)
+        res1 = self.solve_N(x0, N1, lb)
 
-                        else:
-                            print("* Decrease to %i does not lower cost: %f > %f"
-                                  % (N, res.info.obj_val+N, cmin))
-                            N += 1
-                            break
-                    else:
-                        print("* Decrease not feasible")
-                        N += 1
-                        break
-                print("* Recompute with N = %i" % N)
-                res = self.solve_N(x0, N)
-
-        else:
+        if (res1.info.status_val != 1 and res1.info.status_val != 2):
             print("* Have to increase horizon")
             feasible = False
-            while not feasible and N <= self.N and time.time() - init_time < time_limit:
-                print("Solve with N = ", N)
-                N += 1
-                res = self.solve_N(x0, N)
-                if (res.info.status_val == 1):
+            while not feasible and N1 <= self.N and time.time() - init_time < time_limit:
+                print("Solve with N = ", N1)
+                N1 += 1
+                res1 = self.solve_N(x0, N1, lb)
+                if (res1.info.status_val == 1):
                     feasible = True
+            if not feasible:
+                print("ERROR: COULD NOT FIND A FEASIBLE SOLUTION")
+                print("Time limit = ", time.time() - init_time, time_limit)
+                print("Latest N = ", N1)
 
-        self.N0 = N
-        return res.info.status_val, res.x[-N*(self.nx+self.nu):], N
+        else:
+            if N1 > 3:
+                cmin = res1.info.obj_val + N1
+
+                # Decrease in accordance with predicted path
+                print("n = %i:   N = %i,  c = %f <= %f"
+                      % (self.nx, N1, cmin, self.cmin_pred))
+                print(x0)
+                print(self.xpred.T)
+                print(self.xpred.T - x0)
+
+                if cmin <= self.cmin_pred:
+                    pass
+                    print("n = %i:   N = %i,  c = %f <= %f"
+                          % (self.nx, N1, cmin, self.cmin_pred))
+
+                else:
+                    # Try with previous horizon
+                    Nnew = N0
+                    res_new = self.solve_N(x0, Nnew, lb)
+                    cnew = res_new.info.obj_val + Nnew
+
+                    # Must increase horizon
+                    if cnew <= cmin:
+                        print("Minimum found by increase")
+                        while time.time() - init_time < time_limit and cnew <= cmin:
+                            if cnew <= self.cmin_pred:
+                                break
+                            else:
+                                # Save these values, optimal for now
+                                cmin = cnew
+                                N1 = Nnew
+                                res1 = res_new
+
+                                Nnew += 1
+                                res_new = self.solve_N(x0, Nnew, lb)
+                                cnew = res_new.info.obj_val + Nnew
+
+                    else:
+                        #print("Minimum found by decrease")
+                        Nnew = N0 - 2
+                        res_new = self.solve_N(x0, Nnew, lb)
+                        cnew = res_new.info.obj_val + Nnew
+
+                        if self.cmin_pred == 0:
+                            while time.time() - init_time < time_limit and cnew <= cmin:
+                                #print("\t N = %i, cmin = %f" % (N1, cmin))
+                                if (res1.info.status_val == 1):
+                                    if cnew <= cmin:
+                                        # Optimal for now
+                                        res1 = res_new
+                                        cmin = cnew
+                                        N1 = Nnew
+
+                                        Nnew -= 1
+                                        res_new = self.solve_N(x0, Nnew, lb)
+                                        cnew = res_new.info.obj_val + Nnew
+
+                                    else:
+                                        N1 = N1 + 1
+                                        #print("N = %i minimum found" % N1)
+                                        break
+                                else:
+                                    print("N = %i not feasible" % N1)
+                                    N = N+1
+                                    break
+
+                        else:
+                            while time.time() - init_time < time_limit and cnew < cmin:
+                                if (res1.info.status_val == 1):
+                                    if cnew < self.cmin_pred:
+                                        break
+                                    else:
+
+                                        res1 = res_new
+                                        cmin = cnew
+                                        N1 = Nnew
+
+                                        Nnew -= 1
+                                        res_new = self.solve_N(x0, Nnew, lb)
+                                        cnew = res_new.info.obj_val + Nnew
+
+                                else:
+                                    break
+
+                # If feasible, try smaller
+                if False:
+                    # print("*\tn = %i:   N = %i,  c = %f >= %f"
+                    #      % (self.nx, N, cmin, self.cmin_pred))
+
+                    while time.time() - init_time < time_limit and N > 3:
+                        N1 -= 1
+                        res1 = self.solve_N(x0, N1, lb)
+                        if (res1.info.status_val == 1):
+                            if res1.info.obj_val + N < self.cmin_pred:
+                                break
+
+                        if (res1.info.status_val == 1):
+                            if res1.info.obj_val + N < cmin:
+                                # print("* FOUND LOER VALUE: %f < %f" %
+                                #      (res1.info.obj_val, cmin))
+                                cmin = res1.info.obj_val + N
+
+                            else:
+                                # print("* Decrease to %i does not lower cost: %f > %f"
+                                #      % (N1, res1.info.obj_val+N, cmin))
+                                N += 1
+                                break
+                        else:
+                            # print("* Decrease not feasible")
+                            N += 1
+                            break
+                    # print("* Recompute with N = %i" % N)
+                    res1 = self.solve_N(x0, N1, lb)
+
+        self.N0 = N1
+        self.cmin_last = res1.info.obj_val + N1
+        path = res1.x[-N1*(self.nx+self.nu):]
+        x1 = np.array([path[self.nu:self.nu+self.nx]]).T
+        u0 = np.array([path[0:self.nu]]).T
+        self.xpred = x1
+        self.cmin_pred = (self.cmin_last - 1 -
+                          np.matmul(np.matmul(x1.T, self.Q0), x1) -
+                          np.matmul(np.matmul(u0.T, self.R0), u0))
+        return res1.info.status_val, path, N1, self.cmin_last
 
 
 if __name__ == "__main__":
@@ -564,8 +677,8 @@ if __name__ == "__main__":
     #    (np.linalg.matrix_power(A, 2)*Ts**2)/2 +
     #    (np.linalg.matrix_power(A, 2)*Ts**3)/6 +
     #    (np.linalg.matrix_power(A, 3)*Ts**4)/24
-    #A = np.eye(nx) + np.matmul(A, Phi)
-    #B = np.matmul(Phi, B)
+    # A = np.eye(nx) + np.matmul(A, Phi)
+    # B = np.matmul(Phi, B)
 
     A_hrz = A[hrz_idx, :][:, hrz_idx]
     B_hrz = B[hrz_idx, None,  0]

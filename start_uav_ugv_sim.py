@@ -20,11 +20,16 @@ from control import Positioner, ControllerOSQP, ControllerPID,  Kalman
 from control import ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon
 from control import get_horizontal_dynamics, get_vertical_dynamics
 from control import get_y_ugv, get_y_uav, get_h_uav
-from control import Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt
+from control import Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, q_hrz, r_hrz
 from control import Q_hrz, R_hrz, Fset, Yset, W
+from control import get_LQR_infinite_cost
+
+
+from kalmanlib import StateFilter,  UAVinput, UGVinput, UAVstate, UGVstate
 
 from datetime import datetime
 from fgsock import UDPConnect, vector_of_double, InputProtocol, UAVProtocol
+import scipy
 
 
 # REACHABLE SET
@@ -72,13 +77,14 @@ ugv = Vehicle("Ground Vehicle", "ugv")
 
 ugv.control_variables = {'Velocity': {'range': (0, 35), 'value': 23},
                          'Heading': {'range': (-180, 180), 'value': 0},
-                         'Acceleration': {'range': (-5, 5), 'value': 0}}
+                         'Acceleration': {'range': (-2, 2), 'value': 0}}
 
 uav.control_variables = {'Altitude': {'range': (0, 100), 'value': 18},
                          'Velocity': {'range': (15, 35), 'value': 23},
                          'Heading': {'range': (-180, 180), 'value': 0},
-                         'Acceleration': {'range': (-5, 5), 'value': 0},
-                         'Gamma': {'range': (-15, 15), 'value': 0}}
+                         'Acceleration': {'range': (-4, 4), 'value': 0},
+                         'Gamma': {'range': (-15, 15), 'value': 0},
+                         'Yawrate': {'range': (-5, 5), 'value': 0}}
 
 
 class MainSimulation(object):
@@ -87,8 +93,6 @@ class MainSimulation(object):
     ap_mode = 'HOLD'
     uav_state = np.zeros((8, 1))
     ugv_state = np.zeros((5, 1))
-    uav_input = InputProtocol
-    ugv_input = InputProtocol
     uav_time = 0
     ugv_time = 0
     plot_it = 0
@@ -97,25 +101,30 @@ class MainSimulation(object):
     d_s = 2.3
     d_l = 0.5
     itr = 0
-    count = 0
+    count = 1
+    xpath = None
 
     def __init__(self):
         self.ds = 0.1
-        self.Nmax = 300
+        self.Nmax = 150
         self.update_rate = 100
-        self.N_data = 1000
+        self.N_data = 2000
         self.v_ref = 20  # m/s
 
+        self.time_last = time.time()
         self.PID = ControllerPID(self.v_ref, 0.1, 0.1, 0.05, 0.1)
 
-        self.uav_state = np.zeros((8, 1))
-        self.ugv_state = np.zeros((5, 1))
+        self.predicted_state = np.zeros((1, 11))
         self.last_input = np.zeros((5, 1))
         self.ugv_data = np.zeros((self.N_data, 7))*np.NaN
         self.uav_data = np.zeros((self.N_data, 11))*np.NaN
+
         self.time = np.zeros((self.N_data))*np.NaN
         self.solve_time = []
         self.solve_horizon = []
+        self.solve_horizon2 = []
+        self.solve_cost = []
+        self.solve_cost2 = []
 
         A_c_vrt, B_c_vrt, C_vrt, D_vrt = get_vertical_dynamics()
         A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz = get_horizontal_dynamics(
@@ -135,7 +144,7 @@ class MainSimulation(object):
         self.nvar = nx + nu
 
         ny = C_hrz.shape[0]
-        np.set_printoptions(precision=3, linewidth=210, threshold=2000,
+        np.set_printoptions(precision=3, linewidth=200, threshold=2000,
                             edgeitems=15, suppress=True)
 
         Phi = np.eye(nx)*self.ds + \
@@ -152,24 +161,39 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
-        self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
+        self.mpc_hrz = ControllerOSQPRobust(
             A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 4)
 
         self.mpc_vrt = ControllerOSQPRobust(
             A_vrt, B_vrt, C_vrt, D_vrt, self.Nmax, self.ds, 2)
 
         Y, Q = self.mpc_hrz.reachability_matrices(W, Fset, Yset, 25)
-        self.mpc_hrz.set_cost_matrix(Q_hrz, R_hrz, Q_hrz*10, H_hrz, G_hrz)
+        Q2 = np.matmul(H_hrz.T, np.matmul(Q_hrz, H_hrz))
+        R2 = np.matmul(G_hrz.T, np.matmul(R_hrz, G_hrz))
+
+        q2 = np.matmul(q_hrz.T, H_hrz).T
+        r2 = np.matmul(r_hrz.T, G_hrz).T
+
+        Qf, qf = get_LQR_infinite_cost(A_hrz, B_hrz, Q2, R2, q2)
+        #Qf = Q2
+
+        self.mpc_hrz.set_cost_matrix(Q2, R2, Qf, q=q2, r=r2, qf=qf)
+        self.mpc_hrz.add_cross_terms(1, 1)
         self.mpc_hrz.set_inequality_constraints(Y)
         self.mpc_hrz.set_terminal_constraint(Q)
         self.mpc_hrz.setup_problems()
 
         Y, Q = self.mpc_vrt.reachability_matrices(
             W_vrt, Fset_vrt, Yset_vrt, 20)
-        self.mpc_vrt.set_cost_matrix(Q_vrt, R_vrt, Q_vrt)
+
+        # Qf = get_LQR_infinite_cost(A_vrt, B_vrt, Q_vrt, R_vrt)
+        Qf = 5*Q_vrt
+        self.mpc_vrt.set_cost_matrix(Q_vrt, R_vrt, Qf)
         self.mpc_vrt.set_inequality_constraints(Y)
         self.mpc_vrt.set_terminal_constraint(Q)
         self.mpc_vrt.setup_problems()
+
+        self.state_filter = StateFilter()
 
         self.init_time = time.time()
 
@@ -179,6 +203,8 @@ class MainSimulation(object):
         # ugv_ctrl.start()
 
         self.control = True
+        self.state_filter.start_filter()
+
         self.next_call = time.time()
 
         self.control_thread()
@@ -192,15 +218,36 @@ class MainSimulation(object):
         if not self.control:
             return
 
-        self.next_call = max(self.next_call + 1/self.update_rate, time.time())
-
+        self.next_call = max(self.next_call + 0.0099, time.time())
+        self.update_state()
         if self.ap_mode != 'HOLD':
-            self.update_state()
             if self.count == 10:
+                time_now = time.time()
+                print("time = ", time_now - self.time_last)
                 self.compute_control()
-                self.count = 0
+                self.count = 1
+                self.time_last = time_now
             else:
                 self.count += 1
+
+            if self.uav_state[2] < 1.6:
+                print("SUCCESSFUL LANDING")
+                uav_.pause()
+                ugv_.pause()
+                self.stop_control_thread()
+
+        uav_input = UAVinput()
+        ugv_input = UGVinput()
+
+        uav_input.a = uav_ctrl.setpoint.a_ref
+        uav_input.psi = uav_ctrl.setpoint.psi_ref
+        uav_input.yawrate = uav_ctrl.setpoint.yawrate_ref
+        uav_input.gamma = uav_ctrl.setpoint.gamma_ref
+        ugv_input.a = ugv_ctrl.setpoint.a_ref
+        ugv_input.psi = ugv_ctrl.setpoint.psi_ref
+
+        self.state_filter.update_uav_input(uav_input)
+        self.state_filter.update_ugv_input(ugv_input)
 
         self.send_command('both')
 
@@ -238,61 +285,16 @@ class MainSimulation(object):
         uav_ctrl.setpoint.v_ref = max(min(28.0, v_uav), 18.0)     # [m/s]
         ugv_ctrl.setpoint.v_ref = max(min(30.0, v_ugv), 0)     # [m/s]
 
-        if abs(deltax) < 35:
-            uav_.landing_mode()
+        if abs(deltax) < 15:
+            uav_.landing_mode_drone()
             ugv_.landing_mode()
             self.final_stage = True
-            self.mpc_hrz.initial_solve(state)
 
-    def compute_mpc(self, state_t, input_t):
-        """ Computes the optimal path for the final stage of the landing
-            The method is MPC with two spearate controllers.
-            Inputs: state_t The state at time t
-                    input_t The input at time t """
-        # try:
-        # Save the past 4 UAV heading inputs
-        start_time = time.time()
-
-        if False:
-            res = self.mpc_hrz.solve(state_t)
-
-            u0 = res.x[0]  # Thrust UAV
-            u1 = res.x[1]  # Steering UAV
-            u2 = res.x[2]  # Thrust UGV
-            u3 = res.x[3]  # Steering UGV
-
-            x1 = res.x[np.arange(4, self.nvar*self.Nmax, self.nvar)]
-            y1 = res.x[np.arange(5, self.nvar*self.Nmax, self.nvar)]
-            v1 = res.x[np.arange(6, self.nvar*self.Nmax, self.nvar)]
-            x2 = res.x[np.arange(10, self.nvar*self.Nmax, self.nvar)]
-            y2 = res.x[np.arange(11, self.nvar*self.Nmax, self.nvar)]
-            v2 = res.x[np.arange(12, self.nvar*self.Nmax, self.nvar)]
-
-            distance = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
-                                 for i in range(len(x1))])
-
-            scaling = np.ones((self.mpc_vrt.ni, 1))
-            scaling[np.arange(1, self.mpc_vrt.ni, self.mpc_vrt.ny), 0] = np.maximum(
-                np.minimum((self.h_s * distance - self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s), -0.01)
-
-            lower_bound = self.mpc_vrt.ineq_l.copy()
-            lower_bound[self.mpc_vrt.ne:self.mpc_vrt.ni +
-                        self.mpc_vrt.ne] *= scaling
-
-            print("1 deltax = ", x1[0:20] - x2[0:20])
-
-        else:
-            status, path, N = self.mpc_hrz.solve(state_t)
-            #N = self.Nmax
-
+            status, path, N, c = self.mpc_hrz.initial_solve(state)
             x1 = path[np.arange(4, N*self.nvar, self.nvar)]
             x2 = path[np.arange(10, N*self.nvar, self.nvar)]
             y1 = path[np.arange(5, N*self.nvar, self.nvar)]
             y2 = path[np.arange(11, N*self.nvar, self.nvar)]
-            u0 = path[0]
-            u1 = path[1]
-            u2 = path[2]
-            u3 = path[3]
 
             dist = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
                              for i in range(len(x1))])
@@ -311,33 +313,111 @@ class MainSimulation(object):
             lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
                         self.mpc_vrt.ne] *= scale
 
-            print("SOLVER = %i, N = %i" % (status, N))
-            print("1 deltax = ", x1[0:20] - x2[0:20])
+            status, path_vrt, N2, c2 = self.mpc_vrt.initial_solve(
+                np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T, lb=lower_bound)
+
+            self.mpc_hrz.initial_solve(state)
+
+    def compute_mpc(self, state_t, input_t):
+        """ Computes the optimal path for the final stage of the landing
+            The method is MPC with two spearate controllers.
+            Inputs: state_t The state at time t
+                    input_t The input at time t """
+        # try:
+        # Save the past 4 UAV heading inputs
+        start_time = time.time()
+
+        status, path, N, c = self.mpc_hrz.solve(state_t)
+        # N = self.Nmax
+        # print("STATE = ", state_t)
+        # print("STATE DIFF = ", state_t-self.predicted_state)
+        x1 = path[np.arange(4, N*self.nvar, self.nvar)]
+        x2 = path[np.arange(10, N*self.nvar, self.nvar)]
+        y1 = path[np.arange(5, N*self.nvar, self.nvar)]
+        y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+        u0 = path[0]
+        u1 = path[1]
+        u2 = path[2]
+        u3 = path[3]
+        if u0 is None:
+            print("ERROR HORIZONTAL", u0)
+            print("SOLVE STATUS = ", status)
+            print("x0 = ")
+            print(state_t)
+            u0_vrt = 0.0
+        else:
+            self.predicted_state = path[range(4, 15)]
+            # print("PRED = ", self.predicted_state)
+
+        dist = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
+                         for i in range(len(x1))])
+
+        scale = np.ones((self.mpc_vrt.ni, 1))
+        scale[np.arange(1, N*self.mpc_vrt.ny,
+                        self.mpc_vrt.ny), 0] = np.maximum(
+                            np.minimum((self.h_s * dist -
+                                        self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
+                            -0.01)
+
+        scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
+              0] = np.ones(((self.Nmax-N)))*-0.01
+
+        lower_bound = self.mpc_vrt.ineq_l.copy()
+        lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
+                    self.mpc_vrt.ne] *= scale
+
+        # print("SOLVER = %i, N = %i" % (status, N))
+        # print("1 deltax = ", x1[0:20] - x2[0:20])
 
         uav_ctrl.setpoint.a_ref = u0  # [m/s2]
         ugv_ctrl.setpoint.a_ref = u2  # [m/s2]
-        uav_ctrl.setpoint.psi_ref = u1  # [rad/s]
+        # uav_ctrl.setpoint.psi_ref = u1  # [rad/s]
+        uav_ctrl.setpoint.yawrate_ref = u1  # [rad/s]
         ugv_ctrl.setpoint.psi_ref = u3  # [rad/s]
 
-        try:
-            path_vrt, status = self.mpc_vrt.solve(
-                np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T, lower_bound)
-            u0_vrt = path_vrt[0]
-            h0 = path_vrt[np.arange(1, 3*self.Nmax, 3)]
-            g0 = path_vrt[np.arange(2, 3*self.Nmax, 3)]
-            uav_ctrl.setpoint.gamma_ref = u0_vrt
-
-        except:
-            print("Could not solve vertical...: ", status)
-            print("state = ", np.array(
+        status, path_vrt, N2, c2 = self.mpc_vrt.solve(
+            np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T, time_limit=0.01, lb=lower_bound)
+        u0_vrt = path_vrt[0]
+        if u0_vrt is None:
+            print("VERTICAL ERROR", u0_vrt)
+            print("x0 = ", np.array(
                 [[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]))
+            print(x1)
+            print(x2)
+            print("deltax")
+            print(x1-x2)
+            print("v1 = ")
+            print(path[np.arange(6, N*self.nvar, self.nvar)])
+            print("v2 = ")
+            print(path[np.arange(12, N*self.nvar, self.nvar)])
+            print("DISTANCE")
+            print(dist)
             u0_vrt = 0.0
-            # print(distance)
-            # print("SCALING = ", scaling[1:3:])
+
+        # h0 = path_vrt[np.arange(1, 3*N2, 3)]
+        # g0 = path_vrt[np.arange(2, 3*N2, 3)]
+        uav_ctrl.setpoint.gamma_ref = u0_vrt
+
+        # except:
+        #    print("Could not solve vertical...: ", status)
+        #    print("state = ", np.array(
+        #        [[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]))
+        #    u0_vrt = 0.0
+        # print(distance)
+        # print("SCALING = ", scaling[1:3:])
 
         self.last_input = np.array([[u0, u1, u2, u3, u0_vrt]]).T
         self.solve_time.append(time.time()-start_time)
         self.solve_horizon.append(N)
+        self.solve_horizon2.append(N2)
+
+        self.solve_cost.append(c)
+        self.solve_cost2.append(c2)
+
+        if self.xpath is None:
+            print("*****************************")
+            self.xpath = [self.time[self.itr % self.N_data], N, path]
+
         # self.mpc_vrt.update_equality_constraints(0, 1, v1*self.hparam_uav)
 
         # self.mpc_hrz.update_equality_constraints(1, 4, v1*self.yparam_uav[0])
@@ -365,17 +445,20 @@ class MainSimulation(object):
         uav_state = uav_ctrl.return_uav()
         ugv_state = ugv_ctrl.return_ugv()
 
-        hrz_state = np.array([[uav_state.x, uav_state.y, uav_state.v,
-                               uav_state.a, uav_state.psi -
-                               math.radians(HEADING), uav_state.phi,
-                               ugv_state.x, ugv_state.y, ugv_state.v,
-                               ugv_state.a, ugv_state.psi-math.radians(HEADING)]]).T
+        print("UAV YAW/ROLL = %f   %f" %
+              (uav_state.psi*180/np.pi, uav_state.phi*180/np.pi))
 
-        vrt_state = np.array([[uav_state.h, uav_state.gamma]]).T
+        # hrz_state = np.array([[uav_state.x, uav_state.y, uav_state.v,
+        #                       uav_state.a, uav_state.psi -
+        #                       math.radians(HEADING), uav_state.phi,
+        #                       ugv_state.x, ugv_state.y, ugv_state.v,
+        #                       ugv_state.a, ugv_state.psi-math.radians(HEADING)]]).T
 
-        if self.itr == 0:
-            self.kalman_hrz.x = hrz_state
-            self.kalman_vrt.x = vrt_state
+        # vrt_state = np.array([[uav_state.h, uav_state.gamma]]).T
+
+        # if self.itr == 0:
+        #    self.kalman_hrz.x = hrz_state
+        #    self.kalman_vrt.x = vrt_state
 
         new_uav = not (uav_state.t == self.uav_time)
         new_ugv = not (ugv_state.t == self.ugv_time)
@@ -383,43 +466,88 @@ class MainSimulation(object):
         self.ugv_time = ugv_state.t
 
         # Predict state
-        self.kalman_hrz.predict(self.last_input[0:4, :], 1/self.update_rate)
-        self.kalman_vrt.predict(
-            self.last_input[4, None, :], 1/self.update_rate)
+        # self.kalman_hrz.predict(self.last_input[0:4, :], 1/self.update_rate)
+        # self.kalman_vrt.predict(
+        #    self.last_input[4, None, :], 1/self.update_rate)
 
         # Correct
         if new_uav:
             # Aerial vehicle
             deltat = time_now - uav_state.t
-            hrz_state[0:6, 0] = self.kalman_hrz.prop_uav(hrz_state[0:6, :],
-                                                         self.last_input[0:2, :], deltat)
-            self.kalman_hrz.update_uav(hrz_state[0:6, :])
-            self.kalman_vrt.update_alt(vrt_state)
+            uav_measurement = UAVstate()
+
+            uav_measurement.x = uav_state.x
+            uav_measurement.y = uav_state.y
+            uav_measurement.h = uav_state.h
+            uav_measurement.vx = uav_state.vx
+            uav_measurement.vy = uav_state.vy
+            uav_measurement.vz = uav_state.vz
+            uav_measurement.ax = uav_state.ax
+            uav_measurement.ay = uav_state.ay
+            uav_measurement.az = uav_state.az
+            uav_measurement.phi = uav_state.phi
+            uav_measurement.gamma = uav_state.gamma
+            uav_measurement.psi = uav_state.psi
+
+            uav_measurement.pdot = uav_state.p
+            uav_measurement.qdot = uav_state.q
+            uav_measurement.rdot = uav_state.r
+
+            self.state_filter.update_uav(uav_measurement)
+
+            # hrz_state[0:6, 0] = self.kalman_hrz.prop_uav(hrz_state[0:6, :],
+            #                                             self.last_input[0:2, :], deltat)
+            # self.kalman_hrz.update_uav(hrz_state[0:6, :])
+            # self.kalman_vrt.update_alt(vrt_state)
 
         if new_ugv:
-            # Ground vehicle
             deltat = time_now - ugv_state.t  #
-            hrz_state[6:11, 0] = self.kalman_hrz.prop_ugv(hrz_state[6:11, :],
-                                                          self.last_input[2:4, :], deltat)
-            self.kalman_hrz.update_ugv(hrz_state[6:11, :])
+            ugv_measurement = UGVstate()
 
-        self.uav_state[[2, 5], 0] = self.kalman_vrt.x[:, 0]
-        self.uav_state[[0, 1, 3, 4, 6, 7], 0] = self.kalman_hrz.x[0: 6, 0]
-        self.ugv_state[0: 5, 0] = self.kalman_hrz.x[6:, 0]
+            ugv_measurement.x = ugv_state.x
+            ugv_measurement.y = ugv_state.y
+            ugv_measurement.vx = ugv_state.vx
+            ugv_measurement.vy = ugv_state.vy
+            ugv_measurement.ax = ugv_state.ax
+            ugv_measurement.ay = ugv_state.ay
+            ugv_measurement.psi = ugv_state.psi
+            ugv_measurement.r = ugv_state.r
 
+            self.state_filter.update_ugv(ugv_measurement)
+
+            # Ground vehicle
+            # hrz_state[6:11, 0] = self.kalman_hrz.prop_ugv(hrz_state[6:11, :],
+            #                                              self.last_input[2:4, :], deltat)
+            # self.kalman_hrz.update_ugv(hrz_state[6:11, :])
+        uav_new_state = UAVstate()
+        uav_new_state = self.state_filter.get_uav()
+
+        self.uav_state[:, 0] = [uav_new_state.x, uav_new_state.y, uav_new_state.h,
+                                uav_new_state.vx, uav_new_state.ax, uav_new_state.gamma,
+                                uav_new_state.psi, uav_new_state.phi]
+
+        print("NEW UAV YAW/ROLL = %f   %f" %
+              (uav_new_state.psi*180/np.pi, uav_new_state.phi*180/np.pi))
+
+        ugv_new_state = UGVstate()
+        ugv_new_state = self.state_filter.get_ugv()
+        self.ugv_state[:, 0] = [ugv_new_state.x, ugv_new_state.y,
+                                ugv_new_state.vx, ugv_new_state.ax, ugv_new_state.psi]
+
+        # self.uav_state[[2, 5], 0] = self.kalman_vrt.x[:, 0]
+        # self.uav_state[[0, 1, 3, 4, 6, 7], 0] = self.kalman_hrz.x[0: 6, 0]
+        # self.ugv_state[0: 5, 0] = self.kalman_hrz.x[6:, 0]
+
+        # print("STATES = ")
+        # print(self.uav_state.T)
+        # print(self.ugv_state.T)
         self.uav_data[self.itr % self.N_data, :] = [*self.uav_state[0:8, 0],
                                                     *self.last_input[[0, 1, 4], :]]
         self.ugv_data[self.itr % self.N_data, :] = [*self.ugv_state[0:5, 0],
                                                     *self.last_input[[2, 3], :]]
-
-        self.time[self.itr % self.N_data] = time_now
         self.itr += 1
 
-        if uav_state.h < 1.6:
-            print("SUCCESSFUL LANDING")
-            uav_.pause()
-            ugv_.pause()
-            self.stop_control_thread()
+        self.time[self.itr % self.N_data] = time_now
 
 
 # -------------------- GUI CLASS -------------------------
@@ -450,6 +578,8 @@ class MyGui(SimulationGUI):
                     slider.setValue(uav_ctrl.setpoint.psi_ref)
                 elif str(slider.objectName()).lower() == "gamma":
                     slider.setValue(uav_ctrl.setpoint.gamma_ref)
+                elif str(slider.objectName()).lower() == "yawrate":
+                    slider.setValue(uav_ctrl.setpoint.yawrate_ref)
 
                 else:
                     slider.setValue(
@@ -541,6 +671,32 @@ else:
 
 
 if sim.itr > 0:
+    N = sim.xpath[1]
+    path = sim.xpath[2]
+
+    x1 = path[np.arange(4, N*sim.nvar, sim.nvar)]
+    x2 = path[np.arange(10, N*sim.nvar, sim.nvar)]
+    y1 = path[np.arange(5, N*sim.nvar, sim.nvar)]
+    y2 = path[np.arange(11, N*sim.nvar, sim.nvar)]
+    v1 = path[np.arange(6, N*sim.nvar, sim.nvar)]
+    v2 = path[np.arange(12, N*sim.nvar, sim.nvar)]
+    a1 = path[np.arange(7, N*sim.nvar, sim.nvar)]
+    a2 = path[np.arange(13, N*sim.nvar, sim.nvar)]
+    psi1 = path[np.arange(8, N*sim.nvar, sim.nvar)]
+    phi1 = path[np.arange(9, N*sim.nvar, sim.nvar)]
+    psi2 = path[np.arange(14, N*sim.nvar, sim.nvar)]
+
+    u0 = path[np.arange(0, N*sim.nvar, sim.nvar)]
+    u1 = path[np.arange(1, N*sim.nvar, sim.nvar)]
+    u2 = path[np.arange(2, N*sim.nvar, sim.nvar)]
+    u3 = path[np.arange(3, N*sim.nvar, sim.nvar)]
+
+    timer = np.linspace(sim.xpath[0], sim.xpath[0]+sim.ds*N, N)
+
+    print(len(u0))
+    print(len(x1))
+    print(len(timer))
+
     plt.figure("STATES", (16, 10))
     t0 = sim.time[0]
     plt.suptitle("Simulation states")
@@ -552,6 +708,12 @@ if sim.itr > 0:
              sim.uav_data[:, 1]-sim.ugv_data[:, 1], label='deltay')
     plt.plot([0, t1-t0], [sim.d_l, sim.d_l], color='r')
     plt.plot([0, t1-t0], [-sim.d_l, -sim.d_l], color='r')
+
+    plt.plot(timer-t0, x1-x2, linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.plot(timer-t0, y1-y2, linestyle='dashed',
+             linewidth=1.5, color='purple')
+
     plt.xlabel("Time [s]")
     plt.ylabel("Distance [m]")
     plt.ylim([-5, 30])
@@ -570,6 +732,12 @@ if sim.itr > 0:
     plt.xlabel("Time [s]")
     plt.plot(sim.time-t0, sim.uav_data[:, 3], label='UAV')
     plt.plot(sim.time-t0, sim.ugv_data[:, 2], label='UGV')
+
+    plt.plot(timer-t0, v1, linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.plot(timer-t0, v2, linestyle='dashed',
+             linewidth=1.5, color='purple')
+
     plt.legend()
 
     plt.subplot(3, 2, 4)
@@ -578,6 +746,12 @@ if sim.itr > 0:
     plt.xlabel("Time [s]")
     plt.plot(sim.time-t0, sim.uav_data[:, 4], label='UAV')
     plt.plot(sim.time-t0, sim.ugv_data[:, 3], label='UGV')
+
+    plt.plot(timer-t0, a1, linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.plot(timer-t0, a2, linestyle='dashed',
+             linewidth=1.5, color='purple')
+
     plt.legend()
 
     plt.subplot(3, 2, 5)
@@ -585,8 +759,14 @@ if sim.itr > 0:
     plt.ylabel("Degrees")
     plt.title("Heading")
     plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 6]), label='UAV')
-    plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 7]), label='Roll')
+    #plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 7]), label='Roll')
     plt.plot(sim.time-t0, np.degrees(sim.ugv_data[:, 4]), label='UGV')
+
+    plt.plot(timer-t0, np.degrees(psi1), linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.plot(timer-t0, np.degrees(psi2), linestyle='dashed',
+             linewidth=1.5, color='purple')
+
     plt.ylim([-25, 25])
     plt.legend()
 
@@ -608,6 +788,12 @@ if sim.itr > 0:
     plt.title("Thrust inputs")
     plt.step(sim.time-t0, sim.uav_data[:, 8], label='UAV')
     plt.step(sim.time-t0, sim.ugv_data[:, 5], label='UGV')
+
+    plt.plot(timer-t0, u0, linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.plot(timer-t0, u2, linestyle='dashed',
+             linewidth=1.5, color='purple')
+
     plt.ylim([-5, 5])
     plt.legend()
     plt.subplot(1, 3, 2)
@@ -616,7 +802,13 @@ if sim.itr > 0:
     plt.title("Heading inputs")
     plt.step(sim.time-t0, np.degrees(sim.uav_data[:, 9]), label='UAV')
     plt.step(sim.time-t0, np.degrees(sim.ugv_data[:, 6]), label='UGV')
-    plt.ylim([-35, 35])
+
+    plt.plot(timer-t0, np.degrees(u1), linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.plot(timer-t0, np.degrees(u3), linestyle='dashed',
+             linewidth=1.5, color='purple')
+
+    plt.ylim([-45, 45])
     plt.legend()
 
     plt.subplot(1, 3, 3)
@@ -625,6 +817,7 @@ if sim.itr > 0:
     plt.title("Gamma input")
     plt.step(sim.time-t0, np.degrees(sim.uav_data[:, 10]), label='Input')
     plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 5]), label='Gamma')
+
     plt.ylim([-45, 35])
     plt.legend()
     plt.suptitle("INPUTS")
@@ -637,20 +830,68 @@ if sim.itr > 0:
     ax1.tick_params(axis='y', labelcolor='blue')
     ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
     ax2.plot(sim.solve_horizon, color='green')
+    ax2.scatter(np.arange(0, len(sim.solve_horizon), dtype='float'),
+                sim.solve_horizon, color='green')
+    ax2.plot(sim.solve_horizon2, color='orange')
+    ax2.scatter(np.arange(0, len(sim.solve_horizon), dtype='float'),
+                sim.solve_horizon2, color='orange')
+
+    distance = np.sqrt(np.power(sim.uav_data[:, 0]-sim.ugv_data[:, 0], 2) + np.power(
+        sim.uav_data[:, 1]-sim.ugv_data[:, 1], 2))
+    ax2.plot(distance[np.arange(10, len(distance), 10)], color='m')
+
     ax2.set_ylabel('Horizon', color='green')
     ax2.tick_params(axis='y', labelcolor='green')
+    plt.title("MPC solve time and horizon")
+    plt.tight_layout()  # otherwise the right y-label is slightly clipped
 
-    plt.title("MPC solve time")
-    fig.tight_layout()  # otherwise the right y-label is slightly clipped
+    plt.figure("MPC COST", (16, 10))
+    plt.plot(sim.solve_cost, color='green', label='Horizontal')
+    plt.scatter(np.arange(0, len(sim.solve_cost), dtype='float'),
+                sim.solve_cost, color='green')
+    plt.plot(sim.solve_cost2, color='orange', label='Vertical')
+    plt.scatter(np.arange(0, len(sim.solve_cost2), dtype='float'),
+                sim.solve_cost2, color='orange')
+    plt.legend()
+    plt.title("MPC cost")
+    plt.tight_layout()  # otherwise the right y-label is slightly clipped
+
+    plt.figure("HEADING DELAY", (16, 10))
+    plt.subplot(2, 1, 1)
+    plt.title("X")
+    plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 6]), label='UAV Yaw')
+    plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 7]), label='UAV Roll')
+    plt.step(
+        sim.time-t0, np.degrees(sim.uav_data[:, 9]), label='UAV input', color='k')
+    plt.plot(timer-t0, np.degrees(phi1), linestyle='dashed',
+             linewidth=1.5, color='red')
+    plt.legend()
+    plt.ylabel("Degrees")
+    plt.xlabel("Time [s]")
+
+    plt.subplot(2, 1, 2)
+    plt.plot(sim.time-t0, np.degrees(sim.ugv_data[:, 4]), label='UGV Yaw')
+    plt.step(
+        sim.time-t0, np.degrees(sim.ugv_data[:, 6]), label='UGV input', color='k')
+    plt.plot(timer-t0, np.degrees(psi2), linestyle='dashed',
+             linewidth=1.5, color='red')
+
+    plt.title("Y")
+    plt.xlabel("Time [s]")
+
+    plt.legend()
+    plt.tight_layout()
+
     plt.show()
 
 now = datetime.now()  # current date and time
 date_time = now.strftime("%y%m%d_%H-%M-%S")
 print("date and time:", date_time)
 
-np.savetxt("uav" + date_time + ".csv", sim.uav_data, delimiter=",")
-np.savetxt("ugv" + date_time + ".csv", sim.ugv_data, delimiter=",")
-np.savetxt("time" + date_time + ".csv", sim.time, delimiter=",")
+# np.savetxt("uav" + date_time + ".csv", sim.uav_data, delimiter=",")
+# np.savetxt("ugv" + date_time + ".csv", sim.ugv_data, delimiter=",")
+# np.savetxt("time" + date_time + ".csv", sim.time, delimiter=",")
 
-solver = np.array([sim.solve_horizon, sim.solve_time]).T
+solver = np.array([sim.solve_horizon, sim.solve_horizon2,
+                   sim.solve_time, sim.solve_cost, sim.solve_cost2]).T
 np.savetxt("solver" + date_time + ".csv", solver, delimiter=",")

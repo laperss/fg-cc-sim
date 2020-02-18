@@ -4,7 +4,7 @@
   <generic>
     <input>
       <binary_mode>true</binary_mode>
-      <byte_order>network</byte_order>      
+      <byte_order>host</byte_order>
       <!--<line_separator>\n</line_separator>
       <var_separator>,</var_separator>-->
       <chunk>
@@ -34,6 +34,12 @@
       <chunk>
         <name>gamma_ref</name>
         <node>/fdm/jsbsim/ap/gamma_setpoint</node>
+        <type>float</type>
+      </chunk>
+
+      <chunk>
+        <name>yawrate_ref</name>
+        <node>/fdm/jsbsim/ap/yawrate_setpoint</node>
         <type>float</type>
       </chunk>
     </input>

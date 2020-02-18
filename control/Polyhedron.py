@@ -2,6 +2,7 @@ import cdd
 import numpy as np
 from scipy.sparse import csc_matrix
 import osqp
+import utils
 
 
 class Polyhedron:
@@ -43,7 +44,7 @@ class Polyhedron:
         A[abs(A) < 1e-12] = 0.0
         b[abs(b) < 1e-12] = 0.0
 
-        #print("b = ", b.T)
+        # print("b = ", b.T)
         self.dim = A.shape[1]
         self.ni = b.shape[0]
         self.A = A
@@ -58,7 +59,7 @@ class Polyhedron:
             self.Ae = np.zeros((0, self.dim))
             self.be = np.zeros((0, 1))
 
-        self.add_cdd_polygon(A, b, Ae, be)
+        #self.add_cdd_polygon(A, b, Ae, be)
 
         self.Pul_from_Ab()
 
@@ -70,7 +71,13 @@ class Polyhedron:
             cdd_mat.extend(np.concatenate(
                 (be, -Ae), axis=1).tolist(), linear=True)
 
-        self.cdd_poly = cdd.Polyhedron(cdd_mat)
+        try:
+            self.cdd_poly = cdd.Polyhedron(cdd_mat)
+        except RuntimeError:
+            print("CDD Polyhedron could not be generated : %s" % self.name)
+            print(np.concatenate((b, -A), axis=1))
+            print(cdd_mat)
+            raise RuntimeError
 
     def add_minmax_bounds(self, A, lb, ub):
         self.dim = A.shape[1]
@@ -104,7 +111,8 @@ class Polyhedron:
 
     def check_solution(self, A, lb, ub):
         # Check that a feasible solution exists:
-        settings = {'verbose': False, 'eps_abs': 1e-6, 'eps_rel': 1e-6}
+        settings = {'verbose': False, 'eps_abs': 1e-6,
+                    'eps_rel': 1e-6, 'max_iter': 10000}
         m = osqp.OSQP()
         try:
             m.setup(P=csc_matrix(np.eye(self.dim)),
@@ -112,7 +120,14 @@ class Polyhedron:
                     A=csc_matrix(A), l=lb, u=ub, **settings)
             results = m.solve()
         except:
-            print("VALUE ERROR. From bounds:  %i" % self.from_bounds)
+            print("VALUE ERROR in %s. From bounds:  %i" %
+                  (self.name, self.from_bounds))
+
+            for i in range(len(lb)):
+                if lb[i] > ub[i]:
+                    print("Error in bound %i" % (i))
+                    print("\t %f not less than %f" % (lb[i], ub[i]))
+
             print("LB = ", lb.T)
             print("UB = ", ub.T)
             print(self)
@@ -327,10 +342,17 @@ class Polyhedron:
             results = problem.solve()
 
             if not (results.info.status_val == 1 or results.info.status_val == 2):
+                print("ERROR in pontryagin difference: %s" % self.name)
                 print("\n\nCOULD NOT SOLVE OPTIMIZATION PROBLEM:\nSTATUS_VAL = ",
                       results.info.status_val, utils.return_status_values(results.info.status_val))
+                print("MINIMIZE:")
+                print(-self.A[i, None, 0:].T)
+
+                print("SUBJECT TO")
+                print(Q)
                 print("x = ", results.x.T)
                 raise
+
             H[i, :] = -results.info.obj_val
 
         W = Polyhedron(self.A, self.b-H, name=name)

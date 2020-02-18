@@ -9,6 +9,7 @@ from PyQt5 import QtCore, QtGui
 import pyqtgraph.exporters
 import pyqtgraph as pg
 import pandas as pd
+import math
 
 use_new_udp = True
 
@@ -31,7 +32,7 @@ def run_fg_script(script, vehicle):
     # command.append('--generic=socket,out,50,localhost,%i,tcp,%s'
     #               % (vehicle.control.input_port+4, vehicle.control.output_protocol))
     command.append('--props=socket,bi,10,,%i,tcp' % vehicle.command.port)
-    command.append('--time-match-local')
+    command.append('--timeofday=noon')
     # command.append('--prop:/sim/max-simtime-per-frame=0.01')
 
     print("Attempt to start flightgear: ")
@@ -124,6 +125,7 @@ class SimulationGUI(QtGui.QWidget):
                  'Align': {'check': False}, 'fn': self.toggle_mode}
 
         hold_ = {'Wings-level':  {'check': False},
+                 'Yaw-rate':  {'check': False},
                  'Heading': {'check': True}, 'fn': self.toggle_hold}
 
         acc_ = {'Acceleration':  {'check': False},
@@ -134,17 +136,18 @@ class SimulationGUI(QtGui.QWidget):
 
         groups = {'ctrl': ctrl_, 'mode': mode_,
                   'hold': hold_, 'acc': acc_, 'alt': alt_}
-        rbs = {}
+        rbs = []
+
         for group_name, group in groups.items():
             new_group = QtGui.QButtonGroup(self.buttons_layout)
             new_group.buttonClicked.connect(group.pop('fn', None))
             i = 0
-            rbs[group_name] = {}
+            rbs.append({})
             for name, values in group.items():
-                rbs[group_name][i] = QtGui.QRadioButton(name)
-                rbs[group_name][i].setObjectName(name)
-                rbs[group_name][i].setChecked(values['check'])
-                new_group.addButton(rbs[group_name][i], i)
+                rbs[-1][i] = QtGui.QRadioButton(name)
+                rbs[-1][i].setObjectName(name)
+                rbs[-1][i].setChecked(values['check'])
+                new_group.addButton(rbs[-1][i], i)
                 i += 1
             groups[group_name] = new_group
 
@@ -152,17 +155,13 @@ class SimulationGUI(QtGui.QWidget):
 
         self.settings_layout.addWidget(
             QtGui.QLabel('Control settings'), 0, 0, 1, 4)
-        self.settings_layout.addWidget(rbs['ctrl'][0], 1, 0, 1, 1)
-        self.settings_layout.addWidget(rbs['ctrl'][1], 1, 1, 1, 1)
-        self.settings_layout.addWidget(rbs['mode'][2], 2, 0, 1, 1)
-        self.settings_layout.addWidget(rbs['mode'][0], 2, 1, 1, 1)
-        self.settings_layout.addWidget(rbs['mode'][1], 2, 2, 1, 1)
-        self.settings_layout.addWidget(rbs['hold'][0], 3, 0, 1, 1)
-        self.settings_layout.addWidget(rbs['hold'][1], 3, 1, 1, 1)
-        self.settings_layout.addWidget(rbs['acc'][0], 4, 0, 1, 1)
-        self.settings_layout.addWidget(rbs['acc'][1], 4, 1, 1, 1)
-        self.settings_layout.addWidget(rbs['alt'][0], 5, 0, 1, 1)
-        self.settings_layout.addWidget(rbs['alt'][1], 5, 1, 1, 1)
+
+        # Add buttons to layout
+        j = 1
+        for value in rbs:
+            for i in range(len(value)):
+                self.settings_layout.addWidget(value[i], j, i, 1, 1)
+            j += 1
 
         # Sliders
         for vehicle in self.vehicles:
@@ -372,6 +371,16 @@ class SimulationGUI(QtGui.QWidget):
                 for vehicle in self.vehicles:
                     vehicle.control_variables['Heading']['slider'].setEnabled(
                         True)
+            elif name == 'Yaw-rate':
+                print("Selected yaw rate")
+                uav.command.control_yawrate()
+
+                uav = [vehicle for vehicle in self.vehicles if vehicle.type == 'uav']
+                for vehicle in uav:
+                    vehicle.control_variables['Heading']['slider'].setEnabled(
+                        False)
+                    vehicle.control_variables['Yawrate']['slider'].setEnabled(
+                        True)
 
     def toggle_acc_hold(self, btn):
         """ Callback for acceleration button group. Changes the hold mode of the system. """
@@ -422,9 +431,11 @@ class SimulationGUI(QtGui.QWidget):
                 elif prop.lower() == "altitude":
                     vehicle.control.setpoint.h_ref = value
                 elif prop.lower() == "gamma":
-                    vehicle.control.setpoint.gamma_ref = value
+                    vehicle.control.setpoint.gamma_ref = value*math.pi/180.0
                 elif prop.lower() == "heading":
-                    vehicle.control.setpoint.psi_ref = value
+                    vehicle.control.setpoint.psi_ref = value*math.pi/180.0
+                elif prop.lower() == "yawrate":
+                    vehicle.control.setpoint.yawrate_ref = value*math.pi/180.0
             else:
                 vehicle.control.setpoint[prop.lower()] = value
 

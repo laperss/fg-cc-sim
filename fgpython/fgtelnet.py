@@ -187,12 +187,23 @@ class FGTelnetConnection:
         if self.telnet:
             self.telnet.set("/fdm/jsbsim/ap/heading_hold", 1)
             self.telnet.set("/fdm/jsbsim/ap/attitude_hold", 0)
+            self.telnet.set("/fdm/jsbsim/ap/yawrate_hold", 0)
+
+    def control_yawrate(self):
+        """ Control aircraft altitude """
+        print(
+            "CONTROL YAWRATE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        if self.telnet:
+            self.telnet.set("/fdm/jsbsim/ap/yawrate_hold", 1)
+            self.telnet.set("/fdm/jsbsim/ap/heading_hold", 0)
+            self.telnet.set("/fdm/jsbsim/ap/attitude_hold", 0)
 
     def wings_level(self):
         """ Control aircraft altitude """
         if self.telnet:
             self.telnet.set("/fdm/jsbsim/ap/heading_hold", 0)
             self.telnet.set("/fdm/jsbsim/ap/attitude_hold", 1)
+            self.telnet.set("/fdm/jsbsim/ap/yawrate_hold", 0)
 
     def control_altitude(self):
         """ Control aircraft altitude """
@@ -225,11 +236,17 @@ class FGTelnetConnection:
         self.control_flight_path()
         self.control_heading()
 
+    def landing_mode_drone(self):
+        """ Land aircraft on top of ground vehicle """
+        self.control_acceleration()
+        self.control_flight_path()
+        self.control_yawrate()
+
     def align_mode(self):
         """ Align the vehicles in x- and y """
         self.control_velocity()
         self.control_altitude()
-        self.control_heading()
+        self.control_yawrate()
 
     def view_next(self):
         """ Switch to the next view in FlightGear """
