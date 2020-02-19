@@ -134,22 +134,24 @@ class SimulationGUI(QtGui.QWidget):
         alt_ = {'Altitude':  {'check': True},
                 'gamma': {'check': False}, 'fn': self.toggle_alt_hold}
 
-        groups = {'ctrl': ctrl_, 'mode': mode_,
-                  'hold': hold_, 'acc': acc_, 'alt': alt_}
+        button_groups = [('ctrl', ctrl_), ('mode', mode_),
+                         ('hold', hold_), ('acc', acc_), ('alt', alt_)]
+
+        groups = {}
         rbs = []
 
-        for group_name, group in groups.items():
+        for group in button_groups:
             new_group = QtGui.QButtonGroup(self.buttons_layout)
-            new_group.buttonClicked.connect(group.pop('fn', None))
+            new_group.buttonClicked.connect(group[1].pop('fn', None))
             i = 0
             rbs.append({})
-            for name, values in group.items():
+            for name, values in group[1].items():
                 rbs[-1][i] = QtGui.QRadioButton(name)
                 rbs[-1][i].setObjectName(name)
                 rbs[-1][i].setChecked(values['check'])
                 new_group.addButton(rbs[-1][i], i)
                 i += 1
-            groups[group_name] = new_group
+            groups[group[0]] = new_group
 
         self.groups = groups
 

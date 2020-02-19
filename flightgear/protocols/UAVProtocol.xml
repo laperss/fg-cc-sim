@@ -11,7 +11,9 @@
       <!-- 0: Time -->   
       <chunk>
         <name>time</name>
-        <node>/position/timetoday</node>
+        <!--<node>/position/timetoday</node>-->
+        <!--<node>/sim/time/mp-clock-sec</node>-->
+        <node>/sim/time/steady-clock-sec</node>
         <type>float</type>
         <format>%.10f</format>
       </chunk>

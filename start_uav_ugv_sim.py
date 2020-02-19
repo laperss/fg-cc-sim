@@ -22,7 +22,7 @@ from control import get_horizontal_dynamics, get_vertical_dynamics
 from control import get_y_ugv, get_y_uav, get_h_uav
 from control import Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, q_hrz, r_hrz
 from control import Q_hrz, R_hrz, Fset, Yset, W
-from control import get_LQR_infinite_cost
+from control import get_lqr_feedback
 
 
 from kalmanlib import StateFilter,  UAVinput, UGVinput, UAVstate, UGVstate
@@ -105,7 +105,7 @@ class MainSimulation(object):
     xpath = None
 
     def __init__(self):
-        self.ds = 0.1
+        self.ds = 0.12
         self.Nmax = 150
         self.update_rate = 100
         self.N_data = 2000
@@ -117,7 +117,7 @@ class MainSimulation(object):
         self.predicted_state = np.zeros((1, 11))
         self.last_input = np.zeros((5, 1))
         self.ugv_data = np.zeros((self.N_data, 7))*np.NaN
-        self.uav_data = np.zeros((self.N_data, 11))*np.NaN
+        self.uav_data = np.zeros((self.N_data, 14))*np.NaN
 
         self.time = np.zeros((self.N_data))*np.NaN
         self.solve_time = []
@@ -161,10 +161,10 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
-        self.mpc_hrz = ControllerOSQPRobust(
-            A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 4)
+        self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
+            A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 5)
 
-        self.mpc_vrt = ControllerOSQPRobust(
+        self.mpc_vrt = ControllerOSQPRobustVariableHorizon(
             A_vrt, B_vrt, C_vrt, D_vrt, self.Nmax, self.ds, 2)
 
         Y, Q = self.mpc_hrz.reachability_matrices(W, Fset, Yset, 25)
@@ -174,11 +174,12 @@ class MainSimulation(object):
         q2 = np.matmul(q_hrz.T, H_hrz).T
         r2 = np.matmul(r_hrz.T, G_hrz).T
 
-        Qf, qf = get_LQR_infinite_cost(A_hrz, B_hrz, Q2, R2, q2)
-        #Qf = Q2
+        LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q2, R2, q2)
+        self.LQRgain = LQRgain
+        # Qf = Q2
 
         self.mpc_hrz.set_cost_matrix(Q2, R2, Qf, q=q2, r=r2, qf=qf)
-        self.mpc_hrz.add_cross_terms(1, 1)
+        #self.mpc_hrz.add_cross_terms(1, 1)
         self.mpc_hrz.set_inequality_constraints(Y)
         self.mpc_hrz.set_terminal_constraint(Q)
         self.mpc_hrz.setup_problems()
@@ -239,11 +240,12 @@ class MainSimulation(object):
         uav_input = UAVinput()
         ugv_input = UGVinput()
 
-        uav_input.a = uav_ctrl.setpoint.a_ref
+        uav_input.a = uav_ctrl.setpoint.a_ref / \
+            (np.cos(self.uav_state[5, 0])*np.cos(self.uav_state[6, 0]))
         uav_input.psi = uav_ctrl.setpoint.psi_ref
         uav_input.yawrate = uav_ctrl.setpoint.yawrate_ref
         uav_input.gamma = uav_ctrl.setpoint.gamma_ref
-        ugv_input.a = ugv_ctrl.setpoint.a_ref
+        ugv_input.a = ugv_ctrl.setpoint.a_ref/(np.cos(self.uav_state[4, 0]))
         ugv_input.psi = ugv_ctrl.setpoint.psi_ref
 
         self.state_filter.update_uav_input(uav_input)
@@ -258,19 +260,21 @@ class MainSimulation(object):
         """ Calculates the desired inputs when system is
             in landing mode """
         # Current state
-        state = ([self.uav_state[i, 0] for i in [0, 1, 3, 4, 6, 7]]
-                 + [self.ugv_state[i, 0] for i in [0, 1, 2, 3, 4]])
+        state = np.array([[self.uav_state[i, 0] for i in [0, 1, 3, 4, 6, 7]]
+                          + [self.ugv_state[i, 0] for i in [0, 1, 2, 3, 4]]]).T
 
         # Current input
-        input_ = [uav_ctrl.setpoint.a_ref, math.radians(uav_ctrl.setpoint.psi_ref),
-                  ugv_ctrl.setpoint.a_ref, math.radians(ugv_ctrl.setpoint.psi_ref)]
+        # input_ = [uav_ctrl.setpoint.a_ref, uav_ctrl.setpoint.yawrate_ref,
+        #          ugv_ctrl.setpoint.a_ref, ugv_ctrl.setpoint.psi_ref]
+
+        input_ = self.last_input[0: 4, :]
 
         if self.final_stage:
             self.compute_mpc(state, input_)
         else:
-            self.compute_pid(state)
+            self.compute_pid(state, input_)
 
-    def compute_pid(self, state):
+    def compute_pid(self, state, input_t):
         """ Computes control inputs that will drive the system to the final stage.
             Inputs: state_t The state at time t """
         deltax = self.uav_state[0, 0] - self.ugv_state[0, 0]
@@ -286,11 +290,13 @@ class MainSimulation(object):
         ugv_ctrl.setpoint.v_ref = max(min(30.0, v_ugv), 0)     # [m/s]
 
         if abs(deltax) < 15:
+            print("INITIAL SOLVE: ")
+            print(state)
             uav_.landing_mode_drone()
             ugv_.landing_mode()
             self.final_stage = True
 
-            status, path, N, c = self.mpc_hrz.initial_solve(state)
+            status, path, N, c = self.mpc_hrz.initial_solve(state, input_t)
             x1 = path[np.arange(4, N*self.nvar, self.nvar)]
             x2 = path[np.arange(10, N*self.nvar, self.nvar)]
             y1 = path[np.arange(5, N*self.nvar, self.nvar)]
@@ -314,9 +320,11 @@ class MainSimulation(object):
                         self.mpc_vrt.ne] *= scale
 
             status, path_vrt, N2, c2 = self.mpc_vrt.initial_solve(
-                np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T, lb=lower_bound)
+                np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T,
+                np.array([[uav_ctrl.setpoint.gamma_ref]]).T,
+                lb=lower_bound)
 
-            self.mpc_hrz.initial_solve(state)
+            self.mpc_hrz.initial_solve(state, input_t)
 
     def compute_mpc(self, state_t, input_t):
         """ Computes the optimal path for the final stage of the landing
@@ -327,41 +335,72 @@ class MainSimulation(object):
         # Save the past 4 UAV heading inputs
         start_time = time.time()
 
-        status, path, N, c = self.mpc_hrz.solve(state_t)
-        # N = self.Nmax
-        # print("STATE = ", state_t)
-        # print("STATE DIFF = ", state_t-self.predicted_state)
-        x1 = path[np.arange(4, N*self.nvar, self.nvar)]
-        x2 = path[np.arange(10, N*self.nvar, self.nvar)]
-        y1 = path[np.arange(5, N*self.nvar, self.nvar)]
-        y2 = path[np.arange(11, N*self.nvar, self.nvar)]
-        u0 = path[0]
-        u1 = path[1]
-        u2 = path[2]
-        u3 = path[3]
-        if u0 is None:
-            print("ERROR HORIZONTAL", u0)
-            print("SOLVE STATUS = ", status)
-            print("x0 = ")
-            print(state_t)
-            u0_vrt = 0.0
+        print(np.matmul(Fset.A, state_t) - Fset.b <= 0.001)
+        if ((np.matmul(Fset.A, state_t) - Fset.b) <= 0.001).all():
+            print("*********INSIDE TERMINAL SET**************")
+            print(state_t.T)
+            u = np.matmul(self.LQRgain, state_t)
+            print("GAIN")
+            print(self.LQRgain)
+            print(u)
+            u0 = u[0, 0]
+            u1 = u[1, 0]
+            u2 = u[2, 0]
+            u3 = u[3, 0]
+            print(u0)
+
+            scale = np.ones((self.mpc_vrt.ni, 1))
+
+            scale[np.arange(1, self.mpc_vrt.ni, self.mpc_vrt.ny),
+                  0] = np.ones(((self.Nmax)))*-0.01
+            N = 0
+            c = 0
+
         else:
-            self.predicted_state = path[range(4, 15)]
+            print("STATE = ")
+            print(state_t.T)
+
+            status, path, N, c = self.mpc_hrz.solve(state_t, input_t)
+            # N = self.Nmax
+            # print("STATE = ", state_t)
+            # print("STATE DIFF = ", state_t-self.predicted_state)
+            x1 = path[np.arange(4, N*self.nvar, self.nvar)]
+            x2 = path[np.arange(10, N*self.nvar, self.nvar)]
+            y1 = path[np.arange(5, N*self.nvar, self.nvar)]
+            y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+            u0 = path[self.nvar + 0]
+            u1 = path[self.nvar + 1]
+            u2 = path[self.nvar + 2]
+            u3 = path[self.nvar + 3]
+
+            if u0 is None:
+                print("* ERROR HORIZONTAL", u0)
+                print("* SOLVE STATUS = ", status)
+                print("* x0 = ", state_t)
+                print("* u0 = ", input_t.T)
+                print("* x1 = ", (np.matmul(self.mpc_hrz.A,
+                                            [state_t]) + np.matmul(self.mpc_hrz.B, input_t)).T)
+                u0_vrt = 0.0
+
+            else:
+                self.predicted_state = path[range(4, 15)]
+
+            print("NEW VS OLD: ", u0, input_t[0])
             # print("PRED = ", self.predicted_state)
 
-        dist = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
-                         for i in range(len(x1))])
+            dist = np.array(
+                [math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2) for i in range(len(x1))])
 
-        scale = np.ones((self.mpc_vrt.ni, 1))
-        scale[np.arange(1, N*self.mpc_vrt.ny,
-                        self.mpc_vrt.ny), 0] = np.maximum(
-                            np.minimum((self.h_s * dist -
-                                        self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
-                            -0.01)
+            scale = np.ones((self.mpc_vrt.ni, 1))
+            scale[np.arange(1, N*self.mpc_vrt.ny, self.mpc_vrt.ny), 0] = np.maximum(
+                np.minimum((self.h_s * dist -
+                            self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
+                -0.01)
 
-        scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
-              0] = np.ones(((self.Nmax-N)))*-0.01
+            scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
+                  0] = np.ones(((self.Nmax-N)))*-0.01
 
+        # COMPUTE VERTICAL  SOLUTION
         lower_bound = self.mpc_vrt.ineq_l.copy()
         lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
                     self.mpc_vrt.ne] *= scale
@@ -369,29 +408,32 @@ class MainSimulation(object):
         # print("SOLVER = %i, N = %i" % (status, N))
         # print("1 deltax = ", x1[0:20] - x2[0:20])
 
-        uav_ctrl.setpoint.a_ref = u0  # [m/s2]
-        ugv_ctrl.setpoint.a_ref = u2  # [m/s2]
+        uav_ctrl.setpoint.a_ref = u0 / \
+            (np.cos(self.uav_state[5, 0]) *
+             np.cos(self.uav_state[6, 0]))  # [m/s2]
+        ugv_ctrl.setpoint.a_ref = u2 /\
+            (np.cos(self.ugv_state[4, 0]))  # [m/s2]
         # uav_ctrl.setpoint.psi_ref = u1  # [rad/s]
         uav_ctrl.setpoint.yawrate_ref = u1  # [rad/s]
         ugv_ctrl.setpoint.psi_ref = u3  # [rad/s]
 
         status, path_vrt, N2, c2 = self.mpc_vrt.solve(
-            np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T, time_limit=0.01, lb=lower_bound)
-        u0_vrt = path_vrt[0]
+            np.array([[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]).T,
+            np.array([[self.last_input[-1]]]).T,
+            time_limit=0.01, lb=lower_bound)
+        u0_vrt = path_vrt[3]
         if u0_vrt is None:
-            print("VERTICAL ERROR", u0_vrt)
-            print("x0 = ", np.array(
+            print("* VERTICAL ERROR", u0_vrt)
+            print("  x0 = ", np.array(
                 [[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]))
             print(x1)
             print(x2)
-            print("deltax")
-            print(x1-x2)
+            print("  deltax", x1-x2)
             print("v1 = ")
             print(path[np.arange(6, N*self.nvar, self.nvar)])
             print("v2 = ")
             print(path[np.arange(12, N*self.nvar, self.nvar)])
-            print("DISTANCE")
-            print(dist)
+            print("DISTANCE", dist)
             u0_vrt = 0.0
 
         # h0 = path_vrt[np.arange(1, 3*N2, 3)]
@@ -406,7 +448,8 @@ class MainSimulation(object):
         # print(distance)
         # print("SCALING = ", scaling[1:3:])
 
-        self.last_input = np.array([[u0, u1, u2, u3, u0_vrt]]).T
+        self.last_input = np.array([[u0, u1, u2, u3,
+                                     u0_vrt]]).T
         self.solve_time.append(time.time()-start_time)
         self.solve_horizon.append(N)
         self.solve_horizon2.append(N2)
@@ -445,8 +488,8 @@ class MainSimulation(object):
         uav_state = uav_ctrl.return_uav()
         ugv_state = ugv_ctrl.return_ugv()
 
-        print("UAV YAW/ROLL = %f   %f" %
-              (uav_state.psi*180/np.pi, uav_state.phi*180/np.pi))
+        # print("UAV YAW/ROLL = %f   %f" %
+        #      (uav_state.psi*180/np.pi, uav_state.phi*180/np.pi))
 
         # hrz_state = np.array([[uav_state.x, uav_state.y, uav_state.v,
         #                       uav_state.a, uav_state.psi -
@@ -526,13 +569,13 @@ class MainSimulation(object):
                                 uav_new_state.vx, uav_new_state.ax, uav_new_state.gamma,
                                 uav_new_state.psi, uav_new_state.phi]
 
-        print("NEW UAV YAW/ROLL = %f   %f" %
-              (uav_new_state.psi*180/np.pi, uav_new_state.phi*180/np.pi))
+        # print("NEW UAV YAW/ROLL = %f   %f" %
+        #      (uav_new_state.psi*180/np.pi, uav_new_state.phi*180/np.pi))
 
         ugv_new_state = UGVstate()
         ugv_new_state = self.state_filter.get_ugv()
         self.ugv_state[:, 0] = [ugv_new_state.x, ugv_new_state.y,
-                                ugv_new_state.vx, ugv_new_state.ax, ugv_new_state.psi]
+                                ugv_new_state.vx, ugv_state.ax, ugv_new_state.psi]
 
         # self.uav_state[[2, 5], 0] = self.kalman_vrt.x[:, 0]
         # self.uav_state[[0, 1, 3, 4, 6, 7], 0] = self.kalman_hrz.x[0: 6, 0]
@@ -542,7 +585,8 @@ class MainSimulation(object):
         # print(self.uav_state.T)
         # print(self.ugv_state.T)
         self.uav_data[self.itr % self.N_data, :] = [*self.uav_state[0:8, 0],
-                                                    *self.last_input[[0, 1, 4], :]]
+                                                    *self.last_input[[0, 1, 4], :],
+                                                    uav_state.phi, uav_state.gamma, uav_state.psi]
         self.ugv_data[self.itr % self.N_data, :] = [*self.ugv_state[0:5, 0],
                                                     *self.last_input[[2, 3], :]]
         self.itr += 1
@@ -759,7 +803,7 @@ if sim.itr > 0:
     plt.ylabel("Degrees")
     plt.title("Heading")
     plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 6]), label='UAV')
-    #plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 7]), label='Roll')
+    # plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 7]), label='Roll')
     plt.plot(sim.time-t0, np.degrees(sim.ugv_data[:, 4]), label='UGV')
 
     plt.plot(timer-t0, np.degrees(psi1), linestyle='dashed',
@@ -865,6 +909,11 @@ if sim.itr > 0:
         sim.time-t0, np.degrees(sim.uav_data[:, 9]), label='UAV input', color='k')
     plt.plot(timer-t0, np.degrees(phi1), linestyle='dashed',
              linewidth=1.5, color='red')
+    plt.plot(
+        sim.time-t0, np.degrees(sim.uav_data[:, 13]), label='Raw', linestyle='dashed', color='green')
+    plt.plot(
+        sim.time-t0, np.degrees(sim.uav_data[:, 11]), label='Raw', linestyle='dashed', color='yellow')
+
     plt.legend()
     plt.ylabel("Degrees")
     plt.xlabel("Time [s]")
@@ -880,6 +929,20 @@ if sim.itr > 0:
     plt.xlabel("Time [s]")
 
     plt.legend()
+    plt.tight_layout()
+
+    plt.figure("GAMMA DELAY", (16, 10))
+    plt.title("Gamma")
+    plt.plot(sim.time-t0, np.degrees(sim.uav_data[:, 5]), label='UAV Gamma')
+    plt.step(
+        sim.time-t0, np.degrees(sim.uav_data[:, 10]), label='UAV input', color='k')
+    # plt.plot(timer-t0, np.degrees(phi1), linestyle='dashed',
+    #         linewidth=1.5, color='red')
+    plt.plot(
+        sim.time-t0, np.degrees(sim.uav_data[:, 12]), label='Raw', linestyle='dashed')
+    plt.legend()
+    plt.ylabel("Degrees")
+    plt.xlabel("Time [s]")
     plt.tight_layout()
 
     plt.show()

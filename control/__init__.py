@@ -2,7 +2,7 @@ from .MPC import Controller
 from .positioner import Positioner
 from .MPC_osqp import ControllerOSQP, ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon, reachability_matrices
 from .PID import ControllerPID
-from .LQR import get_LQR_infinite_cost
+from .LQR import get_LQR_infinite_cost, get_lqr_feedback
 from .Polyhedron import Polyhedron
 from .dynamical_models import get_vertical_dynamics, get_horizontal_dynamics, get_y_uav, get_y_ugv, get_h_uav
 from .Kalman_filter import Kalman
