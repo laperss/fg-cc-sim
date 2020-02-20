@@ -3,12 +3,16 @@ import numpy as np
 from scipy.sparse import csc_matrix
 import osqp
 import utils
+from fractions import Fraction
 
 
 class Polyhedron:
     def __init__(self, A, b=None, Ae=None, be=None, lb=None, ub=None, name="Set"):
         self.has_bounds = False
+        self.has_vrep = False
         self.name = name
+        np.set_printoptions(precision=3, linewidth=200, threshold=2000,
+                            edgeitems=15, suppress=True)
 
         # Determine what form is given in inputs
         if lb is not None and ub is not None:
@@ -209,11 +213,48 @@ class Polyhedron:
             self.lb = lb
         self.has_bounds = True
 
+    def compute_vrep(self):
+        # Compute CDD H representation
+        mat = np.concatenate((self.b, -self.A), axis=1)
+        #cddmat = cdd.Matrix(mat.tolist(), number_type='float')
+        fractions_mat = [[] for i in range(mat.shape[0])]
+        for row in range(mat.shape[0]):
+            for col in range(mat.shape[1]):
+                string = "{:.6f}".format(mat[row, col])
+                fractions_mat[row].append(Fraction(string))
+
+        cddmat = cdd.Matrix(fractions_mat, number_type='fraction')
+        cddmat.rep_type = cdd.RepType.INEQUALITY
+        Hpoly = cdd.Polyhedron(cddmat)
+
+        Vrep = cdd.Polyhedron(cddmat).get_generators()
+
+        Vrep_arr = np.array(Vrep)
+        #Vrep_arr[abs(Vrep_arr) < 1e-5] = 0
+        #Vrep_arr = np.around(Vrep_arr, 4)
+
+        self.V = Vrep_arr
+        self.has_vrep = True
+
+        return Vrep_arr
+
+    def pre(self, M):
+        print("* Compute pre set")
+        Anew = np.matmul(self.A, M)
+        Anew = np.around(Anew, 6)
+
+        Xnew = Polyhedron(Anew, b=self.b)
+        return Xnew
+
+    def intersection(self, P):
+        print("* Compute intersection")
+        new_A = np.concatenate((self.A, P.A), axis=0)
+        new_b = np.concatenate((self.b, P.b), axis=0)
+        new_P = Polyhedron(new_A, b=new_b)
+        new_P.minrep()
+        return new_P
+
     def affine_map(self, M, name=None):
-        # Check dimensions
-        if M.shape[1] != self.dim:
-            raise ValueError(
-                "The matrix must have %i columns, has %i" % (self.dim, M.shape[1]))
 
         # If mapping is close to zero
         if np.linalg.norm(M) <= 1e-5:
@@ -223,24 +264,57 @@ class Polyhedron:
         # Check if invertible
         if M.shape[0] == M.shape[1] and abs(np.linalg.det(M)) > 1e-8:
             Minv = np.linalg.inv(M)
+
+            # Check dimensions
+            if M.shape[1] != self.dim:
+                raise ValueError(
+                    "The matrix must have %i columns, has %i" % (self.dim, M.shape[1]))
+
             S_new = Polyhedron(np.matmul(self.A, Minv), b=self.b, name=name)
 
         else:  # If matrix is not square, go to V representation
-            hej = np.concatenate((self.b, -self.A), axis=1)
-            mat = cdd.Matrix(hej.tolist(), number_type='float')
-            mat.rep_type = cdd.RepType.INEQUALITY
-            poly = cdd.Polyhedron(mat)
-            Vrep = cdd.Polyhedron(mat).get_generators()
+            if self.has_vrep:
+                Vrep_arr = self.V
+            else:
+                Vrep_arr = self.compute_vrep()
 
-            # Vrep = self.compute_vrep()
-            new_V = np.concatenate((np.array(Vrep)[:, None, 0],
-                                    np.matmul(M, np.array(Vrep)[:, 1:].T).T), axis=1)
+            new_V = np.concatenate(
+                (Vrep_arr[:, None, 0], np.zeros((len(Vrep_arr), M.shape[0]))), axis=1)
+            columnitr = 0
+            M[abs(M) < 1e-7] = 0
+            M = np.around(M, 6)
+            for column in Vrep_arr[:, 1:]:
+                # print(column)
+                for rownr in range(M.shape[0]):
+                    sum_ = 0
+                    for columnnr in range(M.shape[1]):
+                        # print(column[columnnr])
+                        #print(M[rownr, columnnr])
+                        sum_ += np.around(M[rownr, columnnr]
+                                          * column[columnnr], 8)
+                    new_V[columnitr, 1+rownr] = sum_
+                columnitr += 1
 
-            new_V[abs(new_V) < 1e-6] = 0
-            new_V = np.around(new_V, 6)
+            #print("NEW V = ")
+            # print(new_V)
+
+            #print("MAT = ")
+            # print(M)
+
+            if (abs(new_V[:, 1:]) < 1e-3).all():
+                print("ALMOST EMPTY MATRIX-----------------------------")
+                raise ValueError
+
+            np.set_printoptions(precision=3, linewidth=200, threshold=2000,
+                                edgeitems=10, suppress=True)
+
+            # print(Vrep_arr)
+
+            # print(M)
+            #new_V[abs(new_V) < 1e-10] = 0
+            #new_V = np.around(new_V[:, 1:], 6)
             mat = cdd.Matrix(new_V.tolist(), number_type='float')
             mat.rep_type = cdd.RepType.GENERATOR
-
             try:
                 poly = cdd.Polyhedron(mat).get_inequalities()
 
@@ -257,56 +331,67 @@ class Polyhedron:
                 S_new = Polyhedron(A, b=b, name=name)
             except:
                 print("WARNING NUMERICAL INCONSISTENCY FOUND!")
+                print("MAT = ")
                 print(mat)
 
                 S_new = Polyhedron(A=np.concatenate(
                     (np.eye(self.dim), -np.eye(self.dim))), b=np.zeros((self.dim*2, 1)), name=name)
+                raise TypeError
 
         return S_new
 
     def minrep(self):
-        P = self.A.copy()
-        p = self.b.copy()
-        nc = P.shape[0]
+        A = self.A.copy()
+        b = self.b.copy()
+        nc = A.shape[0]
 
         Q = np.empty((0, self.dim))
         q = np.empty((0, 1))
+        # Keep all indices initially
         idx = [i for i in range(nc)]
 
         settings = {'verbose': False, 'eps_abs': 1e-4,
                     'eps_rel': 1e-4, 'max_iter': int(5e7)}
 
         for i in range(nc):
+            # Test first inequality: S'*X <= t
             idx.pop(0)
-            Pi = P[i, None, 0:]
-            pi = p[i, None, :]
+            S = A[i, None, 0:]
+            t = b[i, None, :]
 
-            PI = P[idx, 0:]
-            pI = p[idx]
+            # The remaining inequalities
+            Atemp = A[idx, 0:]
+            btemp = b[idx]
 
-            new_P = np.concatenate((PI, Pi), axis=0)
-            new_p = np.concatenate((pI, pi+1))
+            new_A = np.concatenate((Atemp, S), axis=0)
+            new_b = np.concatenate((btemp, t+1))
 
-            new_set = Polyhedron(new_P, b=new_p)
+            new_set = Polyhedron(new_A, b=new_b)
 
             problem = osqp.OSQP()
+            # Maximize         S'*x
+            # Subject to       Ax <= b
+            #                  S'*x <= t + 1
             problem.setup(P=csc_matrix(np.zeros((self.dim, self.dim))),
-                          q=-Pi.T, A=new_set.P,
-                          l=new_set.lb, u=new_set.ub, **settings)
+                          q=-S.T,
+                          A=new_set.P, l=new_set.lb, u=new_set.ub, **settings)
 
             result = problem.solve()
 
-            if -result.info.obj_val > pi:
+            # If optimal value is larger than t
+            # Then inequality is not redundant, add back
+            if -result.info.obj_val > t:
                 idx.append(i)
 
-        PI = P[idx, 0:]
-        pI = p[idx]
-        new_set = Polyhedron(PI, pI)
+        Atemp = A[idx, 0:]
+        btemp = b[idx]
+        new_set = Polyhedron(Atemp, btemp)
 
         if new_set.A.shape != self.A.shape:
             print("Minrep is NOT THE SAME: different number of variables!")
             self.A = new_set.A
             self.b = new_set.b
+            self.ni = new_set.b.shape[0]
             self.lb = new_set.lb
             self.ub = new_set.ub
             self.P = new_set.P
@@ -314,6 +399,7 @@ class Polyhedron:
             print("Minrep is NOT THE SAME same!!!!!!!!1")
             self.A = new_set.A
             self.b = new_set.b
+            self.ni = new_set.b.shape[0]
             self.lb = new_set.lb
             self.ub = new_set.ub
             self.P = new_set.P
@@ -342,6 +428,8 @@ class Polyhedron:
             results = problem.solve()
 
             if not (results.info.status_val == 1 or results.info.status_val == 2):
+                print(self)
+                print(Q)
                 print("ERROR in pontryagin difference: %s" % self.name)
                 print("\n\nCOULD NOT SOLVE OPTIMIZATION PROBLEM:\nSTATUS_VAL = ",
                       results.info.status_val, utils.return_status_values(results.info.status_val))

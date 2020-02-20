@@ -20,9 +20,7 @@ from control import Positioner, ControllerOSQP, ControllerPID,  Kalman
 from control import ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon
 from control import get_horizontal_dynamics, get_vertical_dynamics
 from control import get_y_ugv, get_y_uav, get_h_uav
-from control import Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, q_hrz, r_hrz
-from control import Q_hrz, R_hrz, Fset, Yset, W
-from control import get_lqr_feedback
+from control import get_lqr_feedback, get_mpc_sets, get_invariant_set
 
 
 from kalmanlib import StateFilter,  UAVinput, UGVinput, UAVstate, UGVstate
@@ -105,6 +103,7 @@ class MainSimulation(object):
     xpath = None
 
     def __init__(self):
+
         self.ds = 0.12
         self.Nmax = 150
         self.update_rate = 100
@@ -117,7 +116,7 @@ class MainSimulation(object):
         self.predicted_state = np.zeros((1, 11))
         self.last_input = np.zeros((5, 1))
         self.ugv_data = np.zeros((self.N_data, 7))*np.NaN
-        self.uav_data = np.zeros((self.N_data, 14))*np.NaN
+        self.uav_data = np.zeros((self.N_data, 17))*np.NaN
 
         self.time = np.zeros((self.N_data))*np.NaN
         self.solve_time = []
@@ -127,7 +126,7 @@ class MainSimulation(object):
         self.solve_cost2 = []
 
         A_c_vrt, B_c_vrt, C_vrt, D_vrt = get_vertical_dynamics()
-        A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz = get_horizontal_dynamics(
+        A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz, B_dc = get_horizontal_dynamics(
             self.v_ref)
 
         self.hparam_uav = get_h_uav(self.ds)
@@ -144,8 +143,6 @@ class MainSimulation(object):
         self.nvar = nx + nu
 
         ny = C_hrz.shape[0]
-        np.set_printoptions(precision=3, linewidth=200, threshold=2000,
-                            edgeitems=15, suppress=True)
 
         Phi = np.eye(nx)*self.ds + \
             (np.linalg.matrix_power(A_c, 1)*self.ds**2)/2 + \
@@ -153,6 +150,7 @@ class MainSimulation(object):
             (np.linalg.matrix_power(A_c, 3)*self.ds**4)/24
         A_hrz = np.eye(nx) + np.matmul(A_c, Phi)
         B_hrz = np.matmul(Phi, B_c)
+        Bd_hrz = np.matmul(Phi, B_dc)
 
         Phi = np.eye(A_c_vrt.shape[0])*self.ds + \
             (np.linalg.matrix_power(A_c_vrt, 1)*self.ds**2)/2 + \
@@ -161,6 +159,10 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
+        Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz = get_mpc_sets(
+            A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt)
+
+        self.Fset = Fset
         self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
             A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 5)
 
@@ -175,6 +177,8 @@ class MainSimulation(object):
         r2 = np.matmul(r_hrz.T, G_hrz).T
 
         LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q2, R2, q2)
+
+        get_invariant_set(A_hrz, B_hrz, C_hrz, D_hrz, LQRgain, Yset)
         self.LQRgain = LQRgain
         # Qf = Q2
 
@@ -310,10 +314,10 @@ class MainSimulation(object):
                             self.mpc_vrt.ny), 0] = np.maximum(
                                 np.minimum((self.h_s * dist -
                                             self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
-                                -0.01)
+                                -0.5)
 
             scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
-                  0] = np.ones(((self.Nmax-N)))*-0.01
+                  0] = np.ones(((self.Nmax-N)))*-0.5
 
             lower_bound = self.mpc_vrt.ineq_l.copy()
             lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
@@ -335,8 +339,8 @@ class MainSimulation(object):
         # Save the past 4 UAV heading inputs
         start_time = time.time()
 
-        print(np.matmul(Fset.A, state_t) - Fset.b <= 0.001)
-        if ((np.matmul(Fset.A, state_t) - Fset.b) <= 0.001).all():
+        print(np.matmul(self.Fset.A, state_t) - self.Fset.b <= 0.001)
+        if ((np.matmul(self.Fset.A, state_t) - self.Fset.b) <= 0.001).all():
             print("*********INSIDE TERMINAL SET**************")
             print(state_t.T)
             u = np.matmul(self.LQRgain, state_t)
@@ -569,6 +573,8 @@ class MainSimulation(object):
                                 uav_new_state.vx, uav_new_state.ax, uav_new_state.gamma,
                                 uav_new_state.psi, uav_new_state.phi]
 
+        print("MEASURED = [%f  %f  %f] => %f" % (
+            uav_state.ax, uav_state.ay, uav_state.az, uav_new_state.ax))
         # print("NEW UAV YAW/ROLL = %f   %f" %
         #      (uav_new_state.psi*180/np.pi, uav_new_state.phi*180/np.pi))
 
@@ -586,7 +592,8 @@ class MainSimulation(object):
         # print(self.ugv_state.T)
         self.uav_data[self.itr % self.N_data, :] = [*self.uav_state[0:8, 0],
                                                     *self.last_input[[0, 1, 4], :],
-                                                    uav_state.phi, uav_state.gamma, uav_state.psi]
+                                                    uav_state.phi, uav_state.gamma, uav_state.psi,
+                                                    uav_state.ax, uav_state.ay, uav_state.az]
         self.ugv_data[self.itr % self.N_data, :] = [*self.ugv_state[0:5, 0],
                                                     *self.last_input[[2, 3], :]]
         self.itr += 1
@@ -686,6 +693,9 @@ ugv.arguments = {'aircraft': 'ground-vehicle',
                  # 'altitude': 0,
                  }
 # -------------------- MAIN CLASS -------------------------
+np.set_printoptions(precision=3, linewidth=200, threshold=2000,
+                    edgeitems=15, suppress=True)
+
 
 sim = MainSimulation()
 
@@ -791,10 +801,17 @@ if sim.itr > 0:
     plt.plot(sim.time-t0, sim.uav_data[:, 4], label='UAV')
     plt.plot(sim.time-t0, sim.ugv_data[:, 3], label='UGV')
 
-    plt.plot(timer-t0, a1, linestyle='dashed',
-             linewidth=1.5, color='red')
-    plt.plot(timer-t0, a2, linestyle='dashed',
-             linewidth=1.5, color='purple')
+    plt.plot(sim.time-t0, sim.uav_data[:, 14],
+             label='Raw', linestyle='dashed', color='green')
+    plt.plot(sim.time-t0, sim.uav_data[:, 15],
+             label='Raw', linestyle='dashed', color='c')
+    plt.plot(sim.time-t0, sim.uav_data[:, 16],
+             label='Raw', linestyle='dashed', color='yellow')
+
+    # plt.plot(timer-t0, a1, linestyle='dashed',
+    #         linewidth=1.5, color='red')
+    # plt.plot(timer-t0, a2, linestyle='dashed',
+    #         linewidth=1.5, color='purple')
 
     plt.legend()
 

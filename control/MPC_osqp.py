@@ -278,15 +278,17 @@ class ControllerOSQPRobust(ControllerOSQP):
         """
         K = utils.nilpotent_feedback(self.A, self.B, p)
 
-        Q = [None for i in range(p+1)]  # from 0 to N
-        Y = [None for i in range(p+1)]  # from 0 to N
-        L = [None for i in range(p+1)]  # from 0 to N
+        Q = [None for i in range(p)]  # from 0 to P: then constant
+        Y = [None for i in range(p)]  # from 0 to P: then constant
+        L = [None for i in range(p)]  # from 0 to P: then zero
 
         L[0] = np.eye(self.nx)
         Q[0] = Xf
         Y[0] = Y0
 
-        for i in range(p):
+        # The disturbance will go to zero in P steps.
+        # There are P+1 different K matrices
+        for i in range(p-1):
             print("Y[%i] = " % i)
             print(Y[i].lb.T)
             print(Y[i].ub.T)
