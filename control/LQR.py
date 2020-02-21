@@ -76,16 +76,15 @@ def get_invariant_set(A, B, C, D, K, Y):
     print(L.A.shape)
     X0 = L
 
-    for i in range(200):
+    for i in range(500):
         X1 = X0.pre(Acl).intersection(L)
         #X1 = pre(X0, Acl)
         print(X0.A.shape)
         print(X1.A.shape)
-        if (X0.A.shape[0] == X1.A.shape[0]):
-            if (abs(X1.A - X0.A) < 1e-4).all():
-                print("CONVERGED")
-                print(X1)
 
+        if (X1.contains(X0)):
+            print("CONVERGED")
+            print(X1)
         else:
             X0 = X1
 

@@ -238,6 +238,20 @@ class Polyhedron:
 
         return Vrep_arr
 
+    def contains(self, P):
+        if P.has_vrep:
+            Vrep_arr = self.V
+        else:
+            Vrep_arr = P.compute_vrep()
+
+        i = 0
+        for i  in range(Vrep_arr[:,1:].shape[0]):
+            vertex = Vrep_arr[i,None, 1:].T
+            print("VERTEX %i" %i)
+            if not (np.matmul(self.A,vertex) <= self.b).all():
+                return False
+
+
     def pre(self, M):
         print("* Compute pre set")
         Anew = np.matmul(self.A, M)
