@@ -6,8 +6,8 @@ from __future__ import print_function
 import numpy as np
 import math
 
-psi_ugv = 0.9  # ugv steering time constant
-a_ugv = [15.0, -15.1]
+psi_ugv = 0.7  # ugv steering time constant
+a_ugv = [10.3784, -10.545599]
 psi_uav = 0.2  # uav steering time constant
 phi_uav = 3.0  # uav steering time constant
 a_uav = [1.776, -1.776-0.1540]
@@ -19,6 +19,16 @@ roll_ctrl = coefficients[1]
 yaw_gain = coefficients[2]
 yaw_ctrl = coefficients[3]
 yaw_damp = coefficients[4]
+
+
+coefficients = [2.9052,    0.9723,    2.2720,    0.6457,    0.0422]
+roll_ctrl = coefficients[0]
+yaw_gain = coefficients[1]
+roll_damp = coefficients[2]
+yaw_ctrl = coefficients[3]
+yaw_damp = coefficients[4]
+acc_gain = 1.6
+acc_damp = 0.0715
 
 
 def get_param(dt=None):
@@ -159,9 +169,10 @@ def get_horizontal_dynamics(v_ref):
     A = np.array([[0, 0, 1,  0,    0.0,  0.0, 0, 0, 0,  0, 0],  # x
                   [0, 0, 0,  0,    v_ref,  0.0, 0, 0, 0,  0, 0],  # y
                   [0, 0, 0,  1,    0.0,  0.0, 0, 0, 0,  0, 0],  # v
-                  [0, 0, 0, a_uav[1], 0.0,  0.0, 0, 0, 0,  0, 0],  # a
-                  [0, 0, 0,  0,  yaw_damp, yaw_gain, 0, 0, 0, 0, 0],  # psi
-                  [0, 0, 0,  0,    0.0, -roll_ctrl, 0, 0, 0,  0, 0.0],  # phi
+                  [0, 0, 0, -acc_gain-acc_damp, 0.0,  0.0, 0, 0, 0,  0, 0],  # a
+                  [0, 0, 0,  0,  yaw_ctrl-yaw_damp,
+                      yaw_gain, 0, 0, 0, 0, 0],  # psi
+                  [0, 0, 0,  0,  -roll_ctrl, -roll_damp, 0, 0, 0,  0, 0.0],  # phi
                   [0, 0, 0,  0,    0.0,  0.0, 0, 0, 1,  0, 0.0],  # x
                   [0, 0, 0,  0,    0.0,  0.0, 0, 0, 0,  0, v_ref],  # y
                   [0, 0, 0,  0,    0.0,  0.0, 0, 0, 0,  1,  0.0],  # v
@@ -172,9 +183,9 @@ def get_horizontal_dynamics(v_ref):
     B = np.array([[0.0,        0.0,       0.0,       0.0],  # x
                   [0.0,        0.0,       0.0,       0.0],  # y
                   [0.0,        0.0,       0.0,       0.0],  # v
-                  [a_uav[0],    0.0,      0.0,      0.0],  # a
+                  [acc_gain,    0.0,      0.0,      0.0],  # a
                   [0.0,   -yaw_ctrl,      0.0,       0.0],  # psi
-                  [0.0, roll_gain*roll_ctrl, 0.0,      0.0],  # phi
+                  [0.0,    roll_ctrl,     0.0,      0.0],  # phi
                   [0.0,         0.0,      0.0,       0.0],  # x
                   [0.0,         0.0,      0.0,       0.0],  # y
                   [0.0,         0.0,      0.0,       0.0],  # v
@@ -195,6 +206,15 @@ def get_horizontal_dynamics(v_ref):
                    [0.0,         0.0,      0.0,      1.0]])  # psi
 
     # ----------------  x  y  v  a  ps ph x  y  v  a  ps
+    C = np.array([[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],   # v_uav
+                  [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],   # v_ugv
+                  [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],   # a_uav
+                  [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],   # a_ugv
+                  [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],   # phi_uav
+                  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
     C = np.array([[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],   # v_uav
                   [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],   # v_ugv
                   [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],   # a_uav
@@ -227,18 +247,20 @@ def get_horizontal_dynamics(v_ref):
                   [0, 0, 0, 0, 0, 1,  0,  0,  0, 0, 0],   # phi_uav
                   [0, 0, 0, 0, 0, 0,  0,  0,  0, 0, 1]])   # psi_ugv
     # ------------------  x  y  v  a ps ph  x   y   v  a ps
-    F = np.array([[1, 0, 0, 0, 0, 0, -1,  0,  0, 0, 0],   # deltax
-                  [0, 1, 0, 0, 0, 0,  0, -1,  0, 0, 0],   # deltay
-                  [0, 0, 1, 0, 0, 0,  0,  0, -1, 0, 0],   # deltav
-                  [0, 0, 0, 1, 0, 0,  0,  0,  0, 0, 0],   # a_uav
-                  [0, 0, 0, 0, 0, 0,  0,  0,  0, 1, 0],   # a_ugv
-                  [0, 0, 0, 0, 1, 0,  0,  0,  0, 0, 0],   # psi_uav
-                  [0, 0, 0, 0, 0, 1,  0,  0,  0, 0, 0],   # phi_uav
-                  [0, 0, 0, 0, 0, 0,  0,  0,  0, 0, 1]])   # psi_ugv
+    F_new = np.array([[1, 0, 0, 0, 0, 0, -1,  0,  0, 0, 0],   # deltax
+                      [0, 1, 0, 0, 0, 0,  0, -1,  0, 0, 0],   # deltay
+                      [0, 0, 1, 0, 0, 0,  0,  0, -1, 0, 0],   # deltav
+                      [0, 0, 0, 1, 0, 0,  0,  0,  0, 0, 0],   # a_uav
+                      [0, 0, 0, 0, 0, 0,  0,  0,  0, 1, 0],   # a_ugv
+                      [0, 0, 0, 0, 1, 0,  0,  0,  0, 0, 0],   # psi_uav
+                      [0, 0, 0, 0, 0, 1,  0,  0,  0, 0, 0],   # phi_uav
+                      [0, 0, 0, 0, 0, 0,  0,  0,  0, 0, 1]])   # psi_ugv
+
+    # F = np.zeros((0, 11))  # Remove state cost
 
     G = np.array([[1, 0, 0, 0],   # thrust_uav
                   [0, 1, 0, 0],   # steering_ugv
                   [0, 0, 1, 0],   # thrust_ugv
                   [0, 0, 0, 1]])  # steering_uav
 
-    return A, B, C, D, F, G, Bd
+    return A, B, C, D, F, G, Bd, F_new

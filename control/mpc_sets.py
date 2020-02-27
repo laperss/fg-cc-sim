@@ -3,7 +3,10 @@ from .Polyhedron import Polyhedron
 
 
 def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
-    Q_vrt = np.array([[1, 0], [0, 5*180/np.pi]])
+    Q_vrt = np.array([[1, 0],
+                      [0, 5*180/np.pi]])
+    Q_vrt = np.array([[0.1, 0],
+                      [0, 0*180/np.pi]])
     R_vrt = np.array([[15*180/np.pi]])
 
     Y_vrt = np.eye(3)
@@ -23,43 +26,46 @@ def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
                           name='Constraint set')
 
     # ----------------- dx   dy   dv   v    v    a   a   ps   ph   ps
-    # Q_hrz = np.array([[5.0, 0.0, 0.0,  0,   0,   0,   0,   0,   0,   0],
-    #                  [0.0, 0.5, 0.0,  0,   0,   0,   0,   0,   0,   0],
-    #                  [0.0, 0.0, 2.0,  0,   0,   0,   0,   0,   0,   0],
-    #                  [0.0, 0.0, 0.0,  3,   0,   0,   0,   0,   0,   0],
-    #                  [0.0, 0.0, 0.0,  0,   3,   0,   0,   0,   0,   0],
-    #                  [0.0, 0.0, 0.0,  0,   0,   5,   0,   0,   0,   0],
-    #                  [0.0, 0.0, 0.0,  0,   0,   0,   5,   0,   0,   0],
-    #                  [0.0, 0.0, 0.0,  0,   0,   0,   0, 250,   0,   0],
-    #                  [0.0, 0.0, 0.0,  0,   0,   0,   0,   0,  80,  0],
-    #                  [0.0, 0.0, 0.0,  0,   0,   0,   0,   0,   0,  250]])
+    Q_hrz = np.array([[5.0, 0.0, 0.0,  0,   0,   0,   0,   0,   0,   0],
+                      [0.0, 0.5, 0.0,  0,   0,   0,   0,   0,   0,   0],
+                      [0.0, 0.0, 2.0,  0,   0,   0,   0,   0,   0,   0],
+                      [0.0, 0.0, 0.0,  3,   0,   0,   0,   0,   0,   0],
+                      [0.0, 0.0, 0.0,  0,   3,   0,   0,   0,   0,   0],
+                      [0.0, 0.0, 0.0,  0,   0,   5,   0,   0,   0,   0],
+                      [0.0, 0.0, 0.0,  0,   0,   0,   10,   0,   0,   0],
+                      [0.0, 0.0, 0.0,  0,   0,   0,   0, 150,   0,   0],
+                      [0.0, 0.0, 0.0,  0,   0,   0,   0,   0,  80,  0],
+                      [0.0, 0.0, 0.0,  0,   0,   0,   0,   0,   0,  150]])
 
-    Q_hrz = np.array([[5.0, 0.0, 0.0,  0,   0,   0,   0,   0],
-                      [0.0, 0.5, 0.0,   0,   0,   0,   0,   0],
-                      [0.0, 0.0, 2.0,   0,   0,   0,   0,   0],
-                      [0.0, 0.0, 0.0,   5,   0,   0,   0,   0],
-                      [0.0, 0.0, 0.0,   0,   5,   0,   0,   0],
-                      [0.0, 0.0, 0.0,   0,   0, 350,   0,   0],
-                      [0.0, 0.0, 0.0,   0,   0,   0,  200,  0],
-                      [0.0, 0.0, 0.0,   0,   0,   0,   0,  200]])
+    Q_hrz_new = np.array([[5.0, 0.0, 0.0,  0,   0,   0,   0,   0],
+                          [0.0, 0.5, 0.0,   0,   0,   0,   0,   0],
+                          [0.0, 0.0, 2.0,   0,   0,   0,   0,   0],
+                          [0.0, 0.0, 0.0,   5,   0,   0,   0,   0],
+                          [0.0, 0.0, 0.0,   0,   5,   0,   0,   0],
+                          [0.0, 0.0, 0.0,   0,   0, 350,   0,   0],
+                          [0.0, 0.0, 0.0,   0,   0,   0,  200,  0],
+                          [0.0, 0.0, 0.0,   0,   0,   0,   0,  200]])
+
+    # Q_hrz = np.zeros((0, 0))
 
     # ----------------- dx   dy   dv     v1    v2    a    a   ps   ph   ps
-    # q_hrz = np.array(
-    #    [[0.0, 0.0, 0.0, -3*20.0, -3*20.0, 0.0, 0.0, 0.0, 0.0, 0.0]]).T
     q_hrz = np.array(
+        [[0.0, 0.0, 0.0, -3*20.0, -3*20.0, 0.0, 0.0, 0.0, 0.0, 0.0]]).T
+    q_hrz_new = np.array(
         [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]).T
+    # q_hrz = np.zeros((0, 1))
 
-    R_hrz = np.array([[10, 0,  0,  0],
-                      [0, 250, 0,  0],
-                      [0, 0, 10,  0],
-                      [0, 0,  0, 50]])
+    R_hrz = np.array([[20, 0,  0,  0],
+                      [0, 150, 0,  0],
+                      [0, 0, 30,  0],
+                      [0, 0,  0, 150]])  # *0.001
 
     r_hrz = np.array([[0.0, 0.0, 0.0, 0.0]]).T
 
     Y_lb = np.array([[17,      # UAV Velocity
                       0,       # UGV Velocity
                       -1.5,    # UAV Acceleration
-                      -3.5,    # UGV Acceleration
+                      -3.8,    # UGV Acceleration
                       -0.30,   # UAV Roll
                       -0.8,    # UAV Acceleration input
                       -0.2,   # UAV Yawrate input
@@ -69,7 +75,7 @@ def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
     Y_ub = np.array([[25,
                       25,
                       2.0,
-                      3.5,
+                      3.8,
                       0.20,
                       1.0,
                       0.15,
@@ -103,4 +109,4 @@ def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
     Fset = Polyhedron(F_hrz, lb=F_lb, ub=F_ub, name='Terminal set')
     Yset = Polyhedron(Y_hrz, lb=Y_lb, ub=Y_ub, name='Constraint set')
 
-    return Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz
+    return Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz, Q_hrz_new, q_hrz_new

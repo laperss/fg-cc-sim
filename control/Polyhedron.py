@@ -247,9 +247,10 @@ class Polyhedron:
         i = 0
         for i  in range(Vrep_arr[:,1:].shape[0]):
             vertex = Vrep_arr[i,None, 1:].T
-            print("VERTEX %i" %i)
+            print("VERTEX %i: " %i, (np.matmul(self.A,vertex) <= self.b).all())
             if not (np.matmul(self.A,vertex) <= self.b).all():
                 return False
+        return True
 
 
     def pre(self, M):

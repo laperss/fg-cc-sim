@@ -126,7 +126,7 @@ class MainSimulation(object):
         self.solve_cost2 = []
 
         A_c_vrt, B_c_vrt, C_vrt, D_vrt = get_vertical_dynamics()
-        A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz, B_dc = get_horizontal_dynamics(
+        A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz, B_dc, H_hrz_new = get_horizontal_dynamics(
             self.v_ref)
 
         self.hparam_uav = get_h_uav(self.ds)
@@ -159,7 +159,7 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
-        Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz = get_mpc_sets(
+        Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz, Q_hrz_new, q_hrz_new = get_mpc_sets(
             A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt)
 
         self.Fset = Fset
@@ -178,7 +178,7 @@ class MainSimulation(object):
 
         LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q2, R2, q2)
 
-        get_invariant_set(A_hrz, B_hrz, C_hrz, D_hrz, LQRgain, Yset)
+        #get_invariant_set(A_hrz, B_hrz, C_hrz, D_hrz, LQRgain, Yset)
         self.LQRgain = LQRgain
         # Qf = Q2
 
@@ -342,8 +342,10 @@ class MainSimulation(object):
         print(np.matmul(self.Fset.A, state_t) - self.Fset.b <= 0.001)
         if ((np.matmul(self.Fset.A, state_t) - self.Fset.b) <= 0.001).all():
             print("*********INSIDE TERMINAL SET**************")
-            print(state_t.T)
-            u = np.matmul(self.LQRgain, state_t)
+            print(state_t.T - [0, 0, 20, 0, 0, 0, 0, 0, 20, 0, 0])
+
+            u = np.matmul(self.LQRgain, (state_t.T -
+                                         [0, 0, 20, 0, 0, 0, 0, 0, 20, 0, 0]).T)
             print("GAIN")
             print(self.LQRgain)
             print(u)
@@ -352,6 +354,8 @@ class MainSimulation(object):
             u2 = u[2, 0]
             u3 = u[3, 0]
             print(u0)
+            print(u1)
+            print(u2)
 
             scale = np.ones((self.mpc_vrt.ni, 1))
 
@@ -389,7 +393,7 @@ class MainSimulation(object):
             else:
                 self.predicted_state = path[range(4, 15)]
 
-            print("NEW VS OLD: ", u0, input_t[0])
+            #print("NEW VS OLD: ", u0, input_t[0])
             # print("PRED = ", self.predicted_state)
 
             dist = np.array(
@@ -573,8 +577,8 @@ class MainSimulation(object):
                                 uav_new_state.vx, uav_new_state.ax, uav_new_state.gamma,
                                 uav_new_state.psi, uav_new_state.phi]
 
-        print("MEASURED = [%f  %f  %f] => %f" % (
-            uav_state.ax, uav_state.ay, uav_state.az, uav_new_state.ax))
+        # print("MEASURED = [%f  %f  %f] => %f" % (
+        #    uav_state.ax, uav_state.ay, uav_state.az, uav_new_state.ax))
         # print("NEW UAV YAW/ROLL = %f   %f" %
         #      (uav_new_state.psi*180/np.pi, uav_new_state.phi*180/np.pi))
 
@@ -596,6 +600,7 @@ class MainSimulation(object):
                                                     uav_state.ax, uav_state.ay, uav_state.az]
         self.ugv_data[self.itr % self.N_data, :] = [*self.ugv_state[0:5, 0],
                                                     *self.last_input[[2, 3], :]]
+
         self.itr += 1
 
         self.time[self.itr % self.N_data] = time_now
@@ -725,27 +730,45 @@ else:
 
 
 if sim.itr > 0:
-    N = sim.xpath[1]
-    path = sim.xpath[2]
+    try:
+        N = sim.xpath[1]
+        path = sim.xpath[2]
+        x1 = path[np.arange(4, N*sim.nvar, sim.nvar)]
+        x2 = path[np.arange(10, N*sim.nvar, sim.nvar)]
+        y1 = path[np.arange(5, N*sim.nvar, sim.nvar)]
+        y2 = path[np.arange(11, N*sim.nvar, sim.nvar)]
+        v1 = path[np.arange(6, N*sim.nvar, sim.nvar)]
+        v2 = path[np.arange(12, N*sim.nvar, sim.nvar)]
+        a1 = path[np.arange(7, N*sim.nvar, sim.nvar)]
+        a2 = path[np.arange(13, N*sim.nvar, sim.nvar)]
+        psi1 = path[np.arange(8, N*sim.nvar, sim.nvar)]
+        phi1 = path[np.arange(9, N*sim.nvar, sim.nvar)]
+        psi2 = path[np.arange(14, N*sim.nvar, sim.nvar)]
 
-    x1 = path[np.arange(4, N*sim.nvar, sim.nvar)]
-    x2 = path[np.arange(10, N*sim.nvar, sim.nvar)]
-    y1 = path[np.arange(5, N*sim.nvar, sim.nvar)]
-    y2 = path[np.arange(11, N*sim.nvar, sim.nvar)]
-    v1 = path[np.arange(6, N*sim.nvar, sim.nvar)]
-    v2 = path[np.arange(12, N*sim.nvar, sim.nvar)]
-    a1 = path[np.arange(7, N*sim.nvar, sim.nvar)]
-    a2 = path[np.arange(13, N*sim.nvar, sim.nvar)]
-    psi1 = path[np.arange(8, N*sim.nvar, sim.nvar)]
-    phi1 = path[np.arange(9, N*sim.nvar, sim.nvar)]
-    psi2 = path[np.arange(14, N*sim.nvar, sim.nvar)]
+        u0 = path[np.arange(0, N*sim.nvar, sim.nvar)]
+        u1 = path[np.arange(1, N*sim.nvar, sim.nvar)]
+        u2 = path[np.arange(2, N*sim.nvar, sim.nvar)]
+        u3 = path[np.arange(3, N*sim.nvar, sim.nvar)]
 
-    u0 = path[np.arange(0, N*sim.nvar, sim.nvar)]
-    u1 = path[np.arange(1, N*sim.nvar, sim.nvar)]
-    u2 = path[np.arange(2, N*sim.nvar, sim.nvar)]
-    u3 = path[np.arange(3, N*sim.nvar, sim.nvar)]
-
-    timer = np.linspace(sim.xpath[0], sim.xpath[0]+sim.ds*N, N)
+        timer = np.linspace(sim.xpath[0], sim.xpath[0]+sim.ds*N, N)
+    except:
+        N = None
+        x1 = np.zeros((1, 1))
+        x2 = np.zeros((1, 1))
+        y1 = np.zeros((1, 1))
+        y2 = np.zeros((1, 1))
+        v1 = np.zeros((1, 1))
+        v2 = np.zeros((1, 1))
+        a1 = np.zeros((1, 1))
+        a2 = np.zeros((1, 1))
+        psi1 = np.zeros((1, 1))
+        psi2 = np.zeros((1, 1))
+        phi1 = np.zeros((1, 1))
+        u0 = np.zeros((1, 1))
+        u1 = np.zeros((1, 1))
+        u2 = np.zeros((1, 1))
+        u3 = np.zeros((1, 1))
+        timer = np.zeros((1, 1))
 
     print(len(u0))
     print(len(x1))
