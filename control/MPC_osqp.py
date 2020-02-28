@@ -391,7 +391,7 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
     def __init__(self, A, B, C, D, N, ds, nt=0):
         super().__init__(A, B, C, D, N, ds, nt)
         print("N = ", self.N)
-        self.N0 = int(self.N/3)
+        self.N0 = int(self.N-5)
         print("N = ", self.N)
         print("N0 = ", self.N0)
         self.big_M = False
@@ -579,7 +579,8 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
         res1 = self.solve_N(x0, u0, N1, lb)
 
         if (res1.info.status_val != 1):
-            print("*** WARNING: DOES NOT FULFILL THE CONSTRAINTS ***")
+            print("*** WARNING: DOES NOT FULFILL THE CONSTRAINTS ***",
+                  res1.info.status_val)
             print("* Have to increase horizon")
             feasible = False
             while not feasible and N1 <= self.N and time.time() - init_time < time_limit:
@@ -634,7 +635,7 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
                     # Must increase horizon
                     if cnew <= cmin:
                         print("* Minimum found by increase")
-                        while time.time() - init_time < time_limit and cnew <= cmin:
+                        while time.time() - init_time < time_limit and cnew <= cmin and Nnew < self.N:
                             if cnew <= self.cmin_pred:
                                 break
                             else:

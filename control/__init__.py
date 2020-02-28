@@ -8,4 +8,4 @@ from .dynamical_models import get_vertical_dynamics, get_horizontal_dynamics, ge
 from .Kalman_filter import Kalman
 import utils
 
-from .mpc_sets import get_mpc_sets
+from .mpc_sets import get_mpc_sets, get_mpc_costs

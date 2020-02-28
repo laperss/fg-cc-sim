@@ -235,32 +235,6 @@ def get_horizontal_dynamics(v_ref):
                   [0, 0, 1, 0],   # thrust_ugv
                   [0, 0, 0, 1]])   # steering_ugv
 
-    # ------------------  x  y  v  a ps ph  x   y   v  a ps
-    F = np.array([[1, 0, 0, 0, 0, 0, -1,  0,  0, 0, 0],   # deltax
-                  [0, 1, 0, 0, 0, 0,  0, -1,  0, 0, 0],   # deltay
-                  [0, 0, 1, 0, 0, 0,  0,  0, -1, 0, 0],   # deltav
-                  [0, 0, 1, 0, 0, 0,  0,  0,  0, 0, 0],   # vuav
-                  [0, 0, 0, 0, 0, 0,  0,  0,  1, 0, 0],   # vugv
-                  [0, 0, 0, 1, 0, 0,  0,  0,  0, 0, 0],   # a_uav
-                  [0, 0, 0, 0, 0, 0,  0,  0,  0, 1, 0],   # a_ugv
-                  [0, 0, 0, 0, 1, 0,  0,  0,  0, 0, 0],   # psi_uav
-                  [0, 0, 0, 0, 0, 1,  0,  0,  0, 0, 0],   # phi_uav
-                  [0, 0, 0, 0, 0, 0,  0,  0,  0, 0, 1]])   # psi_ugv
-    # ------------------  x  y  v  a ps ph  x   y   v  a ps
-    F_new = np.array([[1, 0, 0, 0, 0, 0, -1,  0,  0, 0, 0],   # deltax
-                      [0, 1, 0, 0, 0, 0,  0, -1,  0, 0, 0],   # deltay
-                      [0, 0, 1, 0, 0, 0,  0,  0, -1, 0, 0],   # deltav
-                      [0, 0, 0, 1, 0, 0,  0,  0,  0, 0, 0],   # a_uav
-                      [0, 0, 0, 0, 0, 0,  0,  0,  0, 1, 0],   # a_ugv
-                      [0, 0, 0, 0, 1, 0,  0,  0,  0, 0, 0],   # psi_uav
-                      [0, 0, 0, 0, 0, 1,  0,  0,  0, 0, 0],   # phi_uav
-                      [0, 0, 0, 0, 0, 0,  0,  0,  0, 0, 1]])   # psi_ugv
-
     # F = np.zeros((0, 11))  # Remove state cost
 
-    G = np.array([[1, 0, 0, 0],   # thrust_uav
-                  [0, 1, 0, 0],   # steering_ugv
-                  [0, 0, 1, 0],   # thrust_ugv
-                  [0, 0, 0, 1]])  # steering_uav
-
-    return A, B, C, D, F, G, Bd, F_new
+    return A, B, C, D, Bd
