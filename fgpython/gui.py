@@ -50,6 +50,7 @@ class SimulationGUI(QtGui.QWidget):
     """ Base GUI class for sending commands to the JSBSim/FlightGear
         landing simulation. """
     simulation_running = False
+    jsbsim_running = False
     uav_file_exists = False
     ugv_file_exists = False
     pause_sim = False
@@ -103,6 +104,9 @@ class SimulationGUI(QtGui.QWidget):
         self.start_sim_btn = QtGui.QPushButton("Start")
         self.start_sim_btn.clicked.connect(self.start_sim)
 
+        self.start_jsbsim_btn = QtGui.QPushButton("Start JSB")
+        self.start_jsbsim_btn.clicked.connect(self.start_jsbsim)
+
         # starting plotting updates
         self.stop_btn = QtGui.QPushButton("Stop")
         self.stop_btn.clicked.connect(self.stop_start)
@@ -111,9 +115,10 @@ class SimulationGUI(QtGui.QWidget):
         self.buttons_layout.addWidget(self.reset_btn, 2, 0, 1, 1)
         self.buttons_layout.addWidget(self.pause_btn, 2, 1, 1, 1)
         self.buttons_layout.addWidget(self.start_sim_btn, 3, 0, 1, 2)
+        self.buttons_layout.addWidget(self.start_jsbsim_btn, 4, 0, 1, 2)
         # self.buttons_layout.addWidget(self.simulation_btn, 2, 0, 1, 1)
-        self.buttons_layout.addWidget(self.stop_btn, 4, 0, 1, 1)
-        self.buttons_layout.addWidget(self.exit_btn, 4, 1, 1, 1)
+        self.buttons_layout.addWidget(self.stop_btn, 5, 0, 1, 1)
+        self.buttons_layout.addWidget(self.exit_btn, 5, 1, 1, 1)
 
         # RADIO BUTTONS
         self.settings_layout = QtGui.QGridLayout()
@@ -251,6 +256,24 @@ class SimulationGUI(QtGui.QWidget):
             for proc in self.proc:
                 proc.terminate()
 
+    def start_jsbsim(self):
+        """ Callback for jsbsim button """
+        if not self.jsbsim_running:
+            self.start_jsbsim_btn.setEnabled(False)
+            self.proc = []
+            for vehicle in self.vehicles:
+                self.proc.append(run_fg_script(vehicle.path, vehicle))
+                time.sleep(0.3)
+
+            for vehicle in self.vehicles:
+                vehicle.running = True
+                self.init_telnet(vehicle)
+        else:
+            self.jsbsim_running = False
+            self.start_jsbsim_btn.setText('Start')
+            for proc in self.proc:
+                proc.terminate()
+                
     def simulation_start_stop(self):
         """ Callback for simulation button """
         print("Simulation: function simulation_start_stop()")
