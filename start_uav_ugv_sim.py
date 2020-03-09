@@ -20,7 +20,7 @@ from control import Positioner, ControllerOSQP, ControllerPID,  Kalman
 from control import ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon
 from control import get_horizontal_dynamics, get_vertical_dynamics
 from control import get_y_ugv, get_y_uav, get_h_uav
-from control import get_lqr_feedback, get_mpc_sets, get_invariant_set
+from control import get_lqr_feedback, get_mpc_sets, get_mpc_costs,  get_invariant_set
 
 
 from kalmanlib import StateFilter,  UAVinput, UGVinput, UAVstate, UGVstate
@@ -29,15 +29,10 @@ from datetime import datetime
 from fgsock import UDPConnect, vector_of_double, InputProtocol, UAVProtocol
 import scipy
 
+from controllerlib import MPC, mpc_x0, mpc_u0, solution
 
-# REACHABLE SET
-# ----------------------------------------------------------
-with open("control/A.csv", "r") as f:
-    readerA = csv.reader(f, delimiter=",")
-    A = np.array(list(readerA)).astype("float")
-with open("control/B.csv", "r") as f:
-    readerB = csv.reader(f, delimiter=",")
-    b = np.array(list(readerB)).astype("float")
+
+controller_mpc = MPC()
 
 
 # MAIN PROGRAM PARAMETERS
@@ -104,8 +99,9 @@ class MainSimulation(object):
 
     def __init__(self):
 
-        self.ds = 0.12
-        self.Nmax = 150
+        self.ds = 0.1
+        self.Nmax = controller_mpc.Nmax
+
         self.update_rate = 100
         self.N_data = 2000
         self.v_ref = 20  # m/s
@@ -126,8 +122,7 @@ class MainSimulation(object):
         self.solve_cost2 = []
 
         A_c_vrt, B_c_vrt, C_vrt, D_vrt = get_vertical_dynamics()
-        A_c, B_c, C_hrz, D_hrz, H_hrz, G_hrz, B_dc, H_hrz_new = get_horizontal_dynamics(
-            self.v_ref)
+        A_c, B_c, C_hrz, D_hrz, B_dc = get_horizontal_dynamics(self.v_ref)
 
         self.hparam_uav = get_h_uav(self.ds)
         self.yparam_uav = get_y_uav(self.ds)
@@ -159,34 +154,73 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
-        Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz, Q_hrz_new, q_hrz_new = get_mpc_sets(
+        Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz = get_mpc_sets(
             A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt)
 
+        Q_vrt, R_vrt, Q_hrz, R_hrz, q_hrz, r_hrz, Qf, qf, const_hrz = get_mpc_costs(
+            A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt, self.v_ref)
+
+        self.const_hrz = const_hrz
         self.Fset = Fset
         self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
             A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 5)
-
         self.mpc_vrt = ControllerOSQPRobustVariableHorizon(
             A_vrt, B_vrt, C_vrt, D_vrt, self.Nmax, self.ds, 2)
 
         Y, Q = self.mpc_hrz.reachability_matrices(W, Fset, Yset, 25)
-        Q2 = np.matmul(H_hrz.T, np.matmul(Q_hrz, H_hrz))
-        R2 = np.matmul(G_hrz.T, np.matmul(R_hrz, G_hrz))
 
-        q2 = np.matmul(q_hrz.T, H_hrz).T
-        r2 = np.matmul(r_hrz.T, G_hrz).T
-
-        LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q2, R2, q2)
+        LQRgain, _, _ = get_lqr_feedback(A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
 
         #get_invariant_set(A_hrz, B_hrz, C_hrz, D_hrz, LQRgain, Yset)
         self.LQRgain = LQRgain
         # Qf = Q2
 
-        self.mpc_hrz.set_cost_matrix(Q2, R2, Qf, q=q2, r=r2, qf=qf)
+        # COPY COST MATRICES
+        for i in range(nx):
+            for j in range(nx):
+                controller_mpc.update_Q(i, j, float(Q_hrz[i, j]))
+                controller_mpc.update_Qf(i, j, float(Qf[i, j]))
+                controller_mpc.update_q(i, float(q_hrz[i, 0]))
+                controller_mpc.update_qf(i, float(qf[i, 0]))
+
+        for i in range(nu):
+            for j in range(nu):
+                controller_mpc.update_R(i, j, float(R_hrz[i, j]))
+                controller_mpc.update_r(i, float(r_hrz[i, 0]))
+
+        controller_mpc.print_cost()
+
+        for i in range(self.Nmax):
+            for j in range(self.mpc_hrz.ny):
+                if i < len(Y):
+                    controller_mpc.update_ymin(i*ny + j, Y[i].lb[j, 0])
+                    controller_mpc.update_ymax(i*ny + j, Y[i].ub[j, 0])
+                else:
+                    controller_mpc.update_ymin(i*ny + j, Y[-1].lb[j, 0])
+                    controller_mpc.update_ymax(i*ny + j, Y[-1].ub[j, 0])
+
+        for i in range(self.Nmax):
+            for j in range(len(Q[0].lb)):
+                if i < len(Q):
+                    controller_mpc.update_Xf_min(
+                        i*len(Q[0].lb) + j, Q[i].lb[j, 0])
+                    controller_mpc.update_Xf_max(
+                        i*len(Q[0].lb) + j, Q[i].ub[j, 0])
+                else:
+                    controller_mpc.update_Xf_min(
+                        i*len(Q[-1].lb) + j, Q[-1].lb[j, 0])
+                    controller_mpc.update_Xf_max(
+                        i*len(Q[-1].lb) + j, Q[-1].ub[j, 0])
+
+        controller_mpc.print_cost()
+
+        controller_mpc.final_setup()
+
+        #self.mpc_hrz.set_cost_matrix(Q2, R2, Qf, q=q2, r=r2, qf=qf)
         #self.mpc_hrz.add_cross_terms(1, 1)
-        self.mpc_hrz.set_inequality_constraints(Y)
-        self.mpc_hrz.set_terminal_constraint(Q)
-        self.mpc_hrz.setup_problems()
+        # self.mpc_hrz.set_inequality_constraints(Y)
+        # self.mpc_hrz.set_terminal_constraint(Q)
+        # self.mpc_hrz.setup_problems()
 
         Y, Q = self.mpc_vrt.reachability_matrices(
             W_vrt, Fset_vrt, Yset_vrt, 20)
@@ -300,11 +334,43 @@ class MainSimulation(object):
             ugv_.landing_mode()
             self.final_stage = True
 
-            status, path, N, c = self.mpc_hrz.initial_solve(state, input_t)
-            x1 = path[np.arange(4, N*self.nvar, self.nvar)]
-            x2 = path[np.arange(10, N*self.nvar, self.nvar)]
-            y1 = path[np.arange(5, N*self.nvar, self.nvar)]
-            y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+            #status, path, N, c = self.mpc_hrz.initial_solve(state, input_t)
+            #x1 = path[np.arange(4, N*self.nvar, self.nvar)]
+            #x2 = path[np.arange(10, N*self.nvar, self.nvar)]
+            #y1 = path[np.arange(5, N*self.nvar, self.nvar)]
+            #y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+            x0 = mpc_x0()
+            x0.x1 = state[0, 0]
+            x0.y1 = state[1, 0]
+            x0.v1 = state[2, 0]
+            x0.a1 = state[3, 0]
+            x0.psi1 = state[4, 0]
+            x0.phi1 = state[5, 0]
+            x0.x2 = state[6, 0]
+            x0.y2 = state[7, 0]
+            x0.v2 = state[8, 0]
+            x0.a2 = state[9, 0]
+            x0.psi2 = state[10, 0]
+
+            u0 = mpc_u0()
+            u0.u0 = input_t[0, 0]
+            u0.u1 = input_t[1, 0]
+            u0.u2 = input_t[2, 0]
+            u0.u3 = input_t[3, 0]
+            controller_mpc.set_initial(x0, u0)
+            status = controller_mpc.solve()
+            if (status):
+                # print(type(result.path))
+                print("Failed to solve INITIAL MPC")
+            else:
+                result = controller_mpc.get_solution()
+                print("INPUT = ", result.u0, result.u1, result.u2, result.u3)
+                N = result.N
+                path = result.path
+                x1 = path[np.arange(4, N*self.nvar, self.nvar)]
+                x2 = path[np.arange(10, N*self.nvar, self.nvar)]
+                y1 = path[np.arange(5, N*self.nvar, self.nvar)]
+                y2 = path[np.arange(11, N*self.nvar, self.nvar)]
 
             dist = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
                              for i in range(len(x1))])
@@ -328,7 +394,7 @@ class MainSimulation(object):
                 np.array([[uav_ctrl.setpoint.gamma_ref]]).T,
                 lb=lower_bound)
 
-            self.mpc_hrz.initial_solve(state, input_t)
+            #self.mpc_hrz.initial_solve(state, input_t)
 
     def compute_mpc(self, state_t, input_t):
         """ Computes the optimal path for the final stage of the landing
@@ -368,47 +434,83 @@ class MainSimulation(object):
             print("STATE = ")
             print(state_t.T)
 
-            status, path, N, c = self.mpc_hrz.solve(state_t, input_t)
-            # N = self.Nmax
-            # print("STATE = ", state_t)
-            # print("STATE DIFF = ", state_t-self.predicted_state)
-            x1 = path[np.arange(4, N*self.nvar, self.nvar)]
-            x2 = path[np.arange(10, N*self.nvar, self.nvar)]
-            y1 = path[np.arange(5, N*self.nvar, self.nvar)]
-            y2 = path[np.arange(11, N*self.nvar, self.nvar)]
-            u0 = path[self.nvar + 0]
-            u1 = path[self.nvar + 1]
-            u2 = path[self.nvar + 2]
-            u3 = path[self.nvar + 3]
+            x0 = mpc_x0()
+            x0.x1 = state_t[0, 0]
+            x0.y1 = state_t[1, 0]
+            x0.v1 = state_t[2, 0]
+            x0.a1 = state_t[3, 0]
+            x0.psi1 = state_t[4, 0]
+            x0.phi1 = state_t[5, 0]
+            x0.x2 = state_t[6, 0]
+            x0.y2 = state_t[7, 0]
+            x0.v2 = state_t[8, 0]
+            x0.a2 = state_t[9, 0]
+            x0.psi2 = state_t[10, 0]
 
-            if u0 is None:
-                print("* ERROR HORIZONTAL", u0)
-                print("* SOLVE STATUS = ", status)
-                print("* x0 = ", state_t)
-                print("* u0 = ", input_t.T)
-                print("* x1 = ", (np.matmul(self.mpc_hrz.A,
-                                            [state_t]) + np.matmul(self.mpc_hrz.B, input_t)).T)
-                u0_vrt = 0.0
+            u0 = mpc_u0()
+            u0.u0 = input_t[0, 0]
+            u0.u1 = input_t[1, 0]
+            u0.u2 = input_t[2, 0]
+            u0.u3 = input_t[3, 0]
 
+            controller_mpc.set_initial(x0, u0)
+            status = controller_mpc.solve()
+            if (status):
+                # print(type(result.path))
+                print("Failed to solve MPC")
             else:
+                result = controller_mpc.get_solution()
+                print("INPUT = ", result.u0, result.u1, result.u2, result.u3)
+                N = result.N
+                c = result.cost + self.const_hrz
+
+                path = result.path
+                #status, path, N, c = self.mpc_hrz.solve(state_t, input_t)
+                # N = self.Nmax
+                # print("STATE = ", state_t)
+                # print("STATE DIFF = ", state_t-self.predicted_state)
+                x1 = path[np.arange(4, N*self.nvar, self.nvar)]
+                x2 = path[np.arange(10, N*self.nvar, self.nvar)]
+                y1 = path[np.arange(5, N*self.nvar, self.nvar)]
+                y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+                #u0 = path[self.nvar + 0]
+                #u1 = path[self.nvar + 1]
+                #u2 = path[self.nvar + 2]
+                #u3 = path[self.nvar + 3]
+
+                u0 = result.u0
+                u1 = result.u1
+                u2 = result.u2
+                u3 = result.u3
                 self.predicted_state = path[range(4, 15)]
 
-            #print("NEW VS OLD: ", u0, input_t[0])
-            # print("PRED = ", self.predicted_state)
+                if u0 is None:
+                    print("* ERROR HORIZONTAL", u0)
+                    print("* SOLVE STATUS = ", status)
+                    print("* x0 = ", state_t)
+                    print("* u0 = ", input_t.T)
+                    print("* x1 = ", (np.matmul(self.mpc_hrz.A,
+                                                [state_t]) + np.matmul(self.mpc_hrz.B, input_t)).T)
+                    u0_vrt = 0.0
 
-            dist = np.array(
-                [math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2) for i in range(len(x1))])
+                #print("NEW VS OLD: ", u0, input_t[0])
+                # print("PRED = ", self.predicted_state)
 
-            scale = np.ones((self.mpc_vrt.ni, 1))
-            scale[np.arange(1, N*self.mpc_vrt.ny, self.mpc_vrt.ny), 0] = np.maximum(
-                np.minimum((self.h_s * dist -
-                            self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
-                -0.01)
+                dist = np.array(
+                    [math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2) for i in range(len(x1))])
 
-            scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
-                  0] = np.ones(((self.Nmax-N)))*-0.01
+                scale = np.ones((self.mpc_vrt.ni, 1))
+                scale[np.arange(1, N*self.mpc_vrt.ny, self.mpc_vrt.ny), 0] = np.maximum(
+                    np.minimum((self.h_s * dist -
+                                self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
+                    -0.01)
 
+                scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
+                      0] = np.ones(((self.Nmax-N)))*-0.01
+
+        # ------------------------------------------------------------------------------------------
         # COMPUTE VERTICAL  SOLUTION
+        # ------------------------------------------------------------------------------------------
         lower_bound = self.mpc_vrt.ineq_l.copy()
         lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
                     self.mpc_vrt.ne] *= scale
@@ -434,14 +536,9 @@ class MainSimulation(object):
             print("* VERTICAL ERROR", u0_vrt)
             print("  x0 = ", np.array(
                 [[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]))
-            print(x1)
-            print(x2)
             print("  deltax", x1-x2)
-            print("v1 = ")
-            print(path[np.arange(6, N*self.nvar, self.nvar)])
-            print("v2 = ")
-            print(path[np.arange(12, N*self.nvar, self.nvar)])
             print("DISTANCE", dist)
+            print("LB", lower_bound.T)
             u0_vrt = 0.0
 
         # h0 = path_vrt[np.arange(1, 3*N2, 3)]

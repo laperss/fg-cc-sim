@@ -233,44 +233,6 @@ class ControllerOSQP(object):
 
         return res.info.status_val, res.x, self.N, res.info.obj_val
 
-
-def reachability_matrices(A, B, C, D, W, Xf, Y0, p, nmax):
-    """ Compute the worst-case disturbances with a linear feedback.
-    The feedback is nilpotent in p steps.
-
-    Returns: Y = list of state/input constraints
-             Q = list of terminal constriants
-    """
-    nx = A.shape[0]
-    nu = B.shape[1]
-
-    K = utils.nilpotent_feedback(A, B, p)
-
-    Q = [None for i in range(p+1)]  # from 0 to N
-    Y = [None for i in range(p+1)]  # from 0 to N
-    L = [None for i in range(p+1)]  # from 0 to N
-
-    L[0] = np.eye(nx)
-    Q[0] = Xf
-    Y[0] = Y0
-
-    for i in range(p):
-
-        L[i+1] = np.matmul((A + np.matmul(B, K[i])), L[i])
-        q, r = np.linalg.qr(L[i+1])
-        x_to_y = np.matmul((C+np.matmul(D, K[i])), L[i])
-
-        Y[i + 1] = Y[i].pontryagin_difference(W.affine_map(x_to_y),
-                                              name="Y[%i]" % (i+1))
-        Y[i+1].minrep()
-
-        Q[i+1] = Q[i].pontryagin_difference(W.affine_map(L[i], name='W[%i]' % (i)),
-                                            name="Q[%i]" % (i+1))
-        Q[i+1].minrep()
-
-    return Y, Q
-
-
 class ControllerOSQPRobust(ControllerOSQP):
     def reachability_matrices(self, W, Xf, Y0, p):
         """ Compute the worst-case disturbances with a linear feedback.

@@ -461,3 +461,44 @@ class Polyhedron:
         W = Polyhedron(self.A, self.b-H, name=name)
 
         return W
+
+
+def reachability_matrices(A, B, C, D, W, Xf, Y0, p):
+    """ Compute the worst-case disturbances with a linear feedback.
+    The feedback is nilpotent in p steps.
+    
+    Returns: Y = list of state/input constraints
+    Q = list of terminal constriants
+    """
+    nx = A.shape[0]
+    K = utils.nilpotent_feedback(A, B, p)
+    
+    Q = [None for i in range(p)]  # from 0 to P: then constant
+    Y = [None for i in range(p)]  # from 0 to P: then constant
+    L = [None for i in range(p)]  # from 0 to P: then zero
+
+    L[0] = np.eye(nx)
+    Q[0] = Xf
+    Y[0] = Y0
+
+    # The disturbance will go to zero in P steps.
+    # There are P+1 different K matrices
+    for i in range(p-1):
+        #print("Y[%i] = " % i)
+        #print(Y[i].lb.T)
+        #print(Y[i].ub.T)
+        
+        L[i+1] = np.matmul((A + np.matmul(B, K[i])), L[i])
+        q, r = np.linalg.qr(L[i+1])
+        x_to_y = np.matmul((C+np.matmul(D, K[i])), L[i])
+        Y[i + 1] = Y[i].pontryagin_difference(W.affine_map(x_to_y),
+                                              name="Y[%i]" % (i+1))
+        Y[i+1].minrep()
+        
+        Q[i+1] = Q[i].pontryagin_difference(W.affine_map(L[i], name='W[%i]' % (i)),
+                                        name="Q[%i]" % (i+1))
+        Q[i+1].minrep()
+
+
+    return Y, Q
+    

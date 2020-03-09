@@ -1,9 +1,9 @@
 from .MPC import Controller
 from .positioner import Positioner
-from .MPC_osqp import ControllerOSQP, ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon, reachability_matrices
+from .MPC_osqp import ControllerOSQP, ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon
 from .PID import ControllerPID
 from .LQR import get_LQR_infinite_cost, get_lqr_feedback, get_invariant_set
-from .Polyhedron import Polyhedron
+from .Polyhedron import Polyhedron, reachability_matrices
 from .dynamical_models import get_vertical_dynamics, get_horizontal_dynamics, get_y_uav, get_y_ugv, get_h_uav
 from .Kalman_filter import Kalman
 import utils

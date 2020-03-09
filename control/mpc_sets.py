@@ -90,10 +90,6 @@ def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
     LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
     qf_hrz = -np.matmul(Qf, hrz_ref)
 
-    print("qf compare: ")
-    print(qf_hrz.T)
-    print(qf.T)
-
     Y_lb = np.array([[17,      # UAV Velocity
                       0,       # UGV Velocity
                       -1.5,    # UAV Acceleration
@@ -209,17 +205,19 @@ def get_mpc_costs(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt, v_ref):
     q_hrz = -np.matmul(Q_hrz, hrz_ref)
     r_hrz = np.zeros((4, 1))
 
-    const_hrz = 109*0.5*np.matmul(hrz_ref.T, np.matmul(Q_hrz, hrz_ref))
+    #const_hrz = 250*0.5*np.matmul(hrz_ref.T, np.matmul(Q_hrz, hrz_ref))
 
     # Compute terminal cost
     LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
     qf_hrz = -np.matmul(Qf, hrz_ref)
-    const_hrz += 0.5*np.matmul(hrz_ref.T, np.matmul(Qf, hrz_ref))
-    print("======== COSNT ===========")
-    print(const_hrz)
 
-    print("qf compare: ")
-    print(qf_hrz.T)
-    print(qf.T)
+    
+    const_hrz = 0.5*np.matmul(hrz_ref.T, np.matmul(Qf, hrz_ref))
+    #print("======== COSNT ===========")
+    #print(const_hrz)
+
+    #print("qf compare: ")
+    #print(qf_hrz.T)
+    #print(qf.T)
 
     return Q_vrt, R_vrt, Q_hrz, R_hrz, q_hrz, r_hrz, Qf, qf_hrz, const_hrz

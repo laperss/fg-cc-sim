@@ -22,13 +22,6 @@ def get_LQR_infinite_cost(A, B, Q, R, q=None):
 
     K = -np.matmul(np.linalg.inv(R + np.matmul(np.matmul(B.T, P), B)),
                    np.matmul(np.matmul(B.T, P), A))
-
-    print(A)
-    print(B)
-    print(Q)
-    print(R)
-    print(K)
-
     qf = np.zeros((len(q), 1))
 
     if q is not None:
