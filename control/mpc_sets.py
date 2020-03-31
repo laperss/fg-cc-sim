@@ -3,20 +3,14 @@ from .Polyhedron import Polyhedron
 from .LQR import *
 
 
-def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
-    Q_vrt = np.array([[1, 0],
-                      [0, 5*180/np.pi]])
-    Q_vrt = np.array([[0.1, 0],
-                      [0, 0*180/np.pi]])
-    R_vrt = np.array([[15*180/np.pi]])
-
+def get_mpc_sets():
     Y_vrt = np.eye(3)
     Y_vrt_lb = np.array([[1, -0.30, -0.25]]).T
     Y_vrt_ub = np.array([[40, 0.30,  0.25]]).T
 
     F_vrt = np.eye(2)
-    F_vrt_lb = np.array([[-2.5, -0.15]]).T
-    F_vrt_ub = np.array([[0.3,   0.15]]).T
+    F_vrt_lb = np.array([[-1.0, -0.15]]).T
+    F_vrt_ub = np.array([[0.4,   0.25]]).T
 
     W_vrt = Polyhedron(np.eye(2),
                        ub=np.array([[0.01, 0.002]]).T,
@@ -53,42 +47,7 @@ def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
                       [0, 1, 0, 0],   # steering_ugv
                       [0, 0, 1, 0],   # thrust_ugv
                       [0, 0, 0, 1]])  # steering_uav
-    # ----------------- dx   dy   dv   v    v    a   a   ps   ph   ps
-    Q_hrz = np.array([[5.0, 0.0, 0.0,  0,   0,   0,   0,   0,   0,   0],
-                      [0.0, 0.5, 0.0,  0,   0,   0,   0,   0,   0,   0],
-                      [0.0, 0.0, 2.0,  0,   0,   0,   0,   0,   0,   0],
-                      [0.0, 0.0, 0.0,  3,   0,   0,   0,   0,   0,   0],
-                      [0.0, 0.0, 0.0,  0,   3,   0,   0,   0,   0,   0],
-                      [0.0, 0.0, 0.0,  0,   0,   5,   0,   0,   0,   0],
-                      [0.0, 0.0, 0.0,  0,   0,   0,   10,   0,   0,   0],
-                      [0.0, 0.0, 0.0,  0,   0,   0,   0, 150,   0,   0],
-                      [0.0, 0.0, 0.0,  0,   0,   0,   0,   0,  80,  0],
-                      [0.0, 0.0, 0.0,  0,   0,   0,   0,   0,   0,  150]])
 
-    Q_hrz_new = np.array([[5.0, 0.0, 0.0,  0,   0,   0,   0,   0],
-                          [0.0, 0.5, 0.0,   0,   0,   0,   0,   0],
-                          [0.0, 0.0, 2.0,   0,   0,   0,   0,   0],
-                          [0.0, 0.0, 0.0,   5,   0,   0,   0,   0],
-                          [0.0, 0.0, 0.0,   0,   5,   0,   0,   0],
-                          [0.0, 0.0, 0.0,   0,   0, 350,   0,   0],
-                          [0.0, 0.0, 0.0,   0,   0,   0,  200,  0],
-                          [0.0, 0.0, 0.0,   0,   0,   0,   0,  200]])
-    R_hrz = np.array([[20, 0,  0,  0],
-                      [0, 150, 0,  0],
-                      [0, 0, 30,  0],
-                      [0, 0,  0, 150]])  # *0.001
-
-    Q_hrz = np.matmul(H_hrz.T, np.matmul(Q_hrz, H_hrz))
-    R_hrz = np.matmul(G_hrz.T, np.matmul(R_hrz, G_hrz))
-
-    q_hrz = -np.matmul(Q_hrz, hrz_ref)
-    r_hrz = np.zeros((4, 1))
-
-    const_hrz = 0.5*np.matmul(hrz_ref.T, np.matmul(Q_hrz, hrz_ref))
-
-    # Compute terminal cost
-    LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
-    qf_hrz = -np.matmul(Qf, hrz_ref)
 
     Y_lb = np.array([[17,      # UAV Velocity
                       0,       # UGV Velocity
@@ -137,13 +96,13 @@ def get_mpc_sets(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt):
     Fset = Polyhedron(F_hrz, lb=F_lb, ub=F_ub, name='Terminal set')
     Yset = Polyhedron(Y_hrz, lb=Y_lb, ub=Y_ub, name='Constraint set')
 
-    return Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz
+    return Fset_vrt, Yset_vrt, W_vrt, Fset, Yset, W
 
 
 def get_mpc_costs(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt, v_ref):
-    Q_vrt = np.array([[1, 0],
+    Q_vrt = np.array([[2, 0],
                       [0, 5*180/np.pi]])
-    Q_vrt = np.array([[0.1, 0],
+    Q_vrt = np.array([[2, 0],
                       [0, 0*180/np.pi]])
     R_vrt = np.array([[15*180/np.pi]])
 

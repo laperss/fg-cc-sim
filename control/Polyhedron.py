@@ -422,9 +422,9 @@ class Polyhedron:
         return new_set
 
     def pontryagin_difference(self, Q, name=None):
-        """ Compute the Pontryagin difference P-Q
-        P = {y: P*y<= p}
-        P = {z: Q*z<= q}
+        """ Compute the Pontryagin difference self - Q
+        self = {y: P*y<= p}
+        self = {z: Q*z<= q}
         W = {x: P*x <= p - H(P, Q)}
         H(P, Q) = max_{x in Q} P*x
         """

@@ -31,6 +31,98 @@ acc_gain = 1.6
 acc_damp = 0.0715
 
 
+def horizontal_derivatives(states,inputs):
+
+    N = states.shape[0]
+    nx = states.shape[1]
+    derivative = np.zeros((N,nx))
+
+    psi_ugv = 0.7 # ugv steering time constant
+    a_ugv = [10.3784, -10.545599]
+
+    coefficients = [2.9052,    0.9723,    2.2720,    0.6457,    0.0422]
+    roll_ctrl = coefficients[0]
+    yaw_gain = coefficients[1]
+    roll_damp = coefficients[2]
+    yaw_ctrl = coefficients[3]
+    yaw_damp = coefficients[4]
+    acc_gain = 1.6
+    acc_damp = 0.0715
+    # initial derivative
+    for i in range(N):
+       derivative[i,0] = np.cos(states[i,4])*states[i,2]; 
+       derivative[i,1] = np.sin(states[i,4])*states[i,2]; 
+       derivative[i,2] = states[i,3]; 
+       derivative[i,3] = (-acc_gain-acc_damp)*states[i,3] + acc_gain*inputs[i,0];
+       derivative[i,4] = (yaw_ctrl-yaw_damp)*states[i,4] + yaw_gain*states[i,5] -yaw_ctrl*inputs[i,1];
+       derivative[i,5] = -roll_ctrl*states[i,4] - roll_damp*states[i,5]+ roll_ctrl*inputs[i,1];
+       
+       derivative[i,6] = np.cos(states[i,10])*states[i,8]; 
+       derivative[i,7] = np.sin(states[i,10])*states[i,8]; 
+       derivative[i,8] = states[i,9]; 
+       derivative[i,9] = a_ugv[1]*states[i,9] + a_ugv[0]*inputs[i,2]
+       derivative[i,10] =  -psi_ugv*states[i,10] + psi_ugv*inputs[i,3]
+    return derivative
+
+def integrate_system(inputs, states, h):
+
+    # Compute next state from state and input using RK4
+    derivative = horizontal_derivatives(states.T,inputs.T);
+    # k1 = h*f(x)
+    k1 = derivative*h;
+    y1 = states + k1.T/2;
+    
+    derivative = horizontal_derivatives(y1.T,inputs.T);
+    # k2 = h*f(x+k1/2)
+    k2 = h*derivative;
+    y2 = states  + k2.T/2;
+    
+    derivative = horizontal_derivatives(y2.T,inputs.T);  
+    # k3 = h*f(x+k2/2)
+    k3 = h*derivative;
+    y3 = states  + k3.T;
+    
+    derivative = horizontal_derivatives(y3.T,inputs.T);
+    # k4 = h*f(x+k3)
+    k4 = h*derivative;
+
+    
+    next_state = states  + 1/6*(k1.T + 2*k2.T + 2*k3.T + k4.T);
+
+    #print(next_state)
+    return next_state
+
+def integrate_path(zvec):
+    inputs = [zvec[0:15:-1], zvec[1:15:-1], zvec[2:15:-1], zvec[3:15:-1]]
+
+    states = [zvec[4:15:-1], zvec[5:15:-1], zvec[6:15:-1], zvec[7:15:-1], zvec[8:15:-1], zvec[9:15:-1], 
+              zvec[10:15:-1], zvec[11:15:-1], zvec[12:15:-1], zvec[13:15:-1], zvec[14:15:-1]]
+
+    #N = size(states,1);
+
+    # Compute next state from state and input using RK4
+    derivative = horizontal_derivatives(states[1:N-1,:],inputs)
+    # k1 = h*f(x)
+    k1 = derivative*h;
+    y1 = states[1:-2,:] + k1/2;
+    
+    derivative = horizontal_derivatives(y1,inputs)
+    # k2 = h*f(x+k1/2)
+    k2 = h*derivative;
+    y2 = states[1:-2,:]  + k2/2;
+    
+    derivative = horizontal_derivatives(y2,inputs)
+    # k3 = h*f(x+k2/2)
+    k3 = h*derivative;
+    y3 = states[1:-2,:]  + k3;
+    
+    derivative = horizontal_derivatives(y3,inputs)
+    # k4 = h*f(x+k3)
+    k4 = h*derivative;
+    next_state = states[1:-2,:]  + 1/6*(k1 + 2*k2 + 2*k3 + k4)
+
+    print(next_state)
+
 def get_param(dt=None):
     A44 = psi_uav
     A45 = 0.55
