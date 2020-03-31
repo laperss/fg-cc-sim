@@ -68,7 +68,7 @@ def rref(B, tol=1e-8, debug=False):
 def nilpotent_feedback(A, B, p):
     # Computing a nilpotent feedback that takes the system to the origin in n
     # steps.
-    print("* COMPUTE NILPOTENT FEEDBACK: p = %i" % p)
+    print("* COMPUTE NILPOTENT FEEDBACK")
     K = [None for i in range(p)]
 
     if A.shape[0] != A.shape[1]:
@@ -100,8 +100,7 @@ def nilpotent_feedback(A, B, p):
     for i in range(p):
         mat = np.matmul((A+np.matmul(B, K[i])), mat)
 
-    print(mat)
-    if (mat > 0.005).any():
+    if (mat > 0.01).any():
         print("Zero matrix = \n", mat)
         raise Warning("Nilpotent did not give expected result")
 

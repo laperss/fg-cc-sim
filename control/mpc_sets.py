@@ -5,12 +5,12 @@ from .LQR import *
 
 def get_mpc_sets():
     Y_vrt = np.eye(3)
-    Y_vrt_lb = np.array([[1, -0.30, -0.25]]).T
-    Y_vrt_ub = np.array([[40, 0.30,  0.25]]).T
+    Y_vrt_lb = np.array([[1, -0.20, -0.20]]).T
+    Y_vrt_ub = np.array([[40, 0.20,  0.20]]).T
 
     F_vrt = np.eye(2)
-    F_vrt_lb = np.array([[-1.0, -0.15]]).T
-    F_vrt_ub = np.array([[0.4,   0.25]]).T
+    F_vrt_lb = np.array([[-0.8, -0.15]]).T
+    F_vrt_ub = np.array([[1.2,   0.25]]).T
 
     W_vrt = Polyhedron(np.eye(2),
                        ub=np.array([[0.01, 0.002]]).T,
@@ -47,7 +47,6 @@ def get_mpc_sets():
                       [0, 1, 0, 0],   # steering_ugv
                       [0, 0, 1, 0],   # thrust_ugv
                       [0, 0, 0, 1]])  # steering_uav
-
 
     Y_lb = np.array([[17,      # UAV Velocity
                       0,       # UGV Velocity
@@ -100,11 +99,11 @@ def get_mpc_sets():
 
 
 def get_mpc_costs(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt, v_ref):
-    Q_vrt = np.array([[2, 0],
-                      [0, 5*180/np.pi]])
-    Q_vrt = np.array([[2, 0],
+    Q_vrt = np.array([[4, 0],
+                      [0, 15*180/np.pi]])
+    Q_vrt = np.array([[4, 0],
                       [0, 0*180/np.pi]])
-    R_vrt = np.array([[15*180/np.pi]])
+    R_vrt = np.array([[25*180/np.pi]])
 
     # ======================= HORIZONTAL SETS ========================
     hrz_ref = np.array([[0, 0, v_ref, 0, 0, 0, 0, 0, v_ref, 0, 0]]).T
@@ -170,13 +169,12 @@ def get_mpc_costs(A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt, v_ref):
     LQRgain, Qf, qf = get_lqr_feedback(A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
     qf_hrz = -np.matmul(Qf, hrz_ref)
 
-    
     const_hrz = 0.5*np.matmul(hrz_ref.T, np.matmul(Qf, hrz_ref))
     #print("======== COSNT ===========")
-    #print(const_hrz)
+    # print(const_hrz)
 
     #print("qf compare: ")
-    #print(qf_hrz.T)
-    #print(qf.T)
+    # print(qf_hrz.T)
+    # print(qf.T)
 
     return Q_vrt, R_vrt, Q_hrz, R_hrz, q_hrz, r_hrz, Qf, qf_hrz, const_hrz

@@ -19,7 +19,7 @@ from fgpython import SimulationGUI, FGTelnetConnection
 from control import Positioner, ControllerOSQP, ControllerPID,  Kalman
 from control import ControllerOSQPRobust, ControllerOSQPRobustVariableHorizon
 from control import get_horizontal_dynamics, get_vertical_dynamics
-from control import get_y_ugv, get_y_uav, get_h_uav
+from control import get_y_ugv, get_y_uav, get_h_uav, reachability_matrices
 from control import get_lqr_feedback, get_mpc_sets, get_mpc_costs,  get_invariant_set
 
 
@@ -52,6 +52,12 @@ SCRIPT = os.path.join(PATH, 'flightgear/run_flightgear.sh')
 # Telnet connection for commands
 ugv_ = FGTelnetConnection('localhost', 6600)
 uav_ = FGTelnetConnection('localhost', 6500)
+
+itr_save = [20, 30, 40, 50, 60]
+itr_time = [0, 0, 0, 0, 0]
+
+predicted_path = np.zeros((200*15, len(itr_save)))*np.nan
+predicted_rendezvous = np.zeros((500, 4))*np.nan
 
 
 class Vehicle(object):
@@ -90,10 +96,11 @@ class MainSimulation(object):
     ugv_time = 0
     plot_it = 0
     final_stage = False
-    h_s = 2
+    h_s = 2+1.5
     d_s = 2.3
     d_l = 0.5
     itr = 0
+    mpc_itr = 0
     count = 1
     xpath = None
 
@@ -101,6 +108,7 @@ class MainSimulation(object):
 
         self.ds = 0.1
         self.Nmax = controller_mpc.Nmax
+        controller_mpc.reset_N(120)
 
         self.update_rate = 100
         self.N_data = 2000
@@ -133,17 +141,17 @@ class MainSimulation(object):
         self.kalman_hrz = Kalman(A_c, B_c)
         self.kalman_vrt = Kalman(A_c_vrt, B_c_vrt)
 
-        nx = A_c.shape[0]
-        nu = B_c.shape[1]
-        self.nvar = nx + nu
+        self.nx = A_c.shape[0]
+        self.nu = B_c.shape[1]
+        self.nvar = self.nx + self.nu
 
-        ny = C_hrz.shape[0]
+        self.ny = C_hrz.shape[0]
 
-        Phi = np.eye(nx)*self.ds + \
+        Phi = np.eye(self.nx)*self.ds + \
             (np.linalg.matrix_power(A_c, 1)*self.ds**2)/2 + \
             (np.linalg.matrix_power(A_c, 2)*self.ds**3)/6 + \
             (np.linalg.matrix_power(A_c, 3)*self.ds**4)/24
-        A_hrz = np.eye(nx) + np.matmul(A_c, Phi)
+        A_hrz = np.eye(self.nx) + np.matmul(A_c, Phi)
         B_hrz = np.matmul(Phi, B_c)
         Bd_hrz = np.matmul(Phi, B_dc)
 
@@ -154,50 +162,77 @@ class MainSimulation(object):
         A_vrt = np.eye(A_c_vrt.shape[0]) + np.matmul(A_c_vrt, Phi)
         B_vrt = np.matmul(Phi, B_c_vrt)
 
-        Q_vrt, R_vrt, Fset_vrt, Yset_vrt, W_vrt, Q_hrz, R_hrz, Fset, Yset, W, q_hrz, r_hrz = get_mpc_sets(
-            A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt)
+        Fset_vrt, Yset_vrt, W_vrt, Fset, Yset, W = get_mpc_sets()
 
         Q_vrt, R_vrt, Q_hrz, R_hrz, q_hrz, r_hrz, Qf, qf, const_hrz = get_mpc_costs(
             A_hrz, B_hrz, Bd_hrz, A_vrt, B_vrt, self.v_ref)
 
-        self.const_hrz = const_hrz
+        self.const_hrz = const_hrz[0, 0]
+        controller_mpc.set_constant(float(const_hrz))
         self.Fset = Fset
-        self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
-            A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 5)
+        # self.mpc_hrz = ControllerOSQPRobustVariableHorizon(
+        #    A_hrz, B_hrz, C_hrz, D_hrz, self.Nmax, self.ds, 5)
         self.mpc_vrt = ControllerOSQPRobustVariableHorizon(
             A_vrt, B_vrt, C_vrt, D_vrt, self.Nmax, self.ds, 2)
 
-        Y, Q = self.mpc_hrz.reachability_matrices(W, Fset, Yset, 25)
+        Y, Q = reachability_matrices(
+            A_hrz, B_hrz, C_hrz, D_hrz, W, Fset, Yset, 25)
 
-        LQRgain, _, _ = get_lqr_feedback(A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
+        # COMPUTE THE LQR MODE 2 FEEDBACK
+        # On delta-form
+        A_ = A_hrz.copy()
+        A_[0:1, 6:10] = -A_[6:7, 6:10]
+        A_ = np.delete(A_, [6, 7], 0)
+        A_ = np.delete(A_, [6, 7], 1)
+        B_ = B_hrz.copy()
+        B_[0:1, 2:3] = B_[6:7, 2:3]
+        B_ = np.delete(B_, [6, 7], 0)
+        Q_ = Q_hrz.copy()
+        Q_ = np.delete(Q_, [6, 7], 0)
+        Q_ = np.delete(Q_, [6, 7], 1)
+        q_ = q_hrz.copy()
+        q_ = np.delete(q_, [6, 7], 0)
+        R_ = R_hrz.copy()
+        self.ref2 = np.array(
+            [[0.0, 0.0, 20.0, 0.0, 0.0,  0.0, 20.0, 0, 0.0]]).T
+        print(A_)
+        print(B_)
+        print(Q_)
+        LQRgain2, LQRquad2, LQRlinear2 = get_lqr_feedback(A_, B_, Q_, R_, q_)
+        LQRgain, LQRquad, LQRlinear = get_lqr_feedback(
+            A_hrz, B_hrz, Q_hrz, R_hrz, q_hrz)
 
         #get_invariant_set(A_hrz, B_hrz, C_hrz, D_hrz, LQRgain, Yset)
-        self.LQRgain = LQRgain
+        self.LQRgain = LQRgain2
+        self.LQRquad = LQRquad2
+        self.LQRlinear = LQRlinear2
+        self.A_hrz = A_hrz
+        self.B_hrz = B_hrz
         # Qf = Q2
 
         # COPY COST MATRICES
-        for i in range(nx):
-            for j in range(nx):
+        for i in range(self.nx):
+            for j in range(self.nx):
                 controller_mpc.update_Q(i, j, float(Q_hrz[i, j]))
                 controller_mpc.update_Qf(i, j, float(Qf[i, j]))
                 controller_mpc.update_q(i, float(q_hrz[i, 0]))
                 controller_mpc.update_qf(i, float(qf[i, 0]))
 
-        for i in range(nu):
-            for j in range(nu):
+        for i in range(self.nu):
+            for j in range(self.nu):
                 controller_mpc.update_R(i, j, float(R_hrz[i, j]))
                 controller_mpc.update_r(i, float(r_hrz[i, 0]))
 
         controller_mpc.print_cost()
 
         for i in range(self.Nmax):
-            for j in range(self.mpc_hrz.ny):
+            for j in range(self.ny):
                 if i < len(Y):
-                    controller_mpc.update_ymin(i*ny + j, Y[i].lb[j, 0])
-                    controller_mpc.update_ymax(i*ny + j, Y[i].ub[j, 0])
+                    controller_mpc.update_ymin(i*self.ny + j, Y[i].lb[j, 0])
+                    controller_mpc.update_ymax(i*self.ny + j, Y[i].ub[j, 0])
                 else:
-                    controller_mpc.update_ymin(i*ny + j, Y[-1].lb[j, 0])
-                    controller_mpc.update_ymax(i*ny + j, Y[-1].ub[j, 0])
+                    controller_mpc.update_ymin(i*self.ny + j, Y[-1].lb[j, 0])
+                    controller_mpc.update_ymax(i*self.ny + j, Y[-1].ub[j, 0])
 
         for i in range(self.Nmax):
             for j in range(len(Q[0].lb)):
@@ -258,6 +293,9 @@ class MainSimulation(object):
             return
 
         self.next_call = max(self.next_call + 0.0099, time.time())
+        if self.final_stage and self.mpc_itr == 0:
+            self.mpc_itr = 1
+
         self.update_state()
         if self.ap_mode != 'HOLD':
             if self.count == 10:
@@ -269,7 +307,7 @@ class MainSimulation(object):
             else:
                 self.count += 1
 
-            if self.uav_state[2] < 1.6:
+            if self.uav_state[2] < 1.5:
                 print("SUCCESSFUL LANDING")
                 uav_.pause()
                 ugv_.pause()
@@ -327,7 +365,7 @@ class MainSimulation(object):
         uav_ctrl.setpoint.v_ref = max(min(28.0, v_uav), 18.0)     # [m/s]
         ugv_ctrl.setpoint.v_ref = max(min(30.0, v_ugv), 0)     # [m/s]
 
-        if abs(deltax) < 15:
+        if abs(deltax) < 35:
             print("INITIAL SOLVE: ")
             print(state)
             uav_.landing_mode_drone()
@@ -358,11 +396,12 @@ class MainSimulation(object):
             u0.u2 = input_t[2, 0]
             u0.u3 = input_t[3, 0]
             controller_mpc.set_initial(x0, u0)
-            status = controller_mpc.solve()
+            status = controller_mpc.solve_variable_N()
             if (status):
                 # print(type(result.path))
                 print("Failed to solve INITIAL MPC")
             else:
+                print("Succeded iin solving MPC")
                 result = controller_mpc.get_solution()
                 print("INPUT = ", result.u0, result.u1, result.u2, result.u3)
                 N = result.N
@@ -371,6 +410,7 @@ class MainSimulation(object):
                 x2 = path[np.arange(10, N*self.nvar, self.nvar)]
                 y1 = path[np.arange(5, N*self.nvar, self.nvar)]
                 y2 = path[np.arange(11, N*self.nvar, self.nvar)]
+                print("deltax = \n", (x1-x2).T)
 
             dist = np.array([math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2)
                              for i in range(len(x1))])
@@ -405,35 +445,57 @@ class MainSimulation(object):
         # Save the past 4 UAV heading inputs
         start_time = time.time()
 
-        print(np.matmul(self.Fset.A, state_t) - self.Fset.b <= 0.001)
+        #print((np.matmul(self.Fset.A, state_t) - self.Fset.b <= 0.001).T)
         if ((np.matmul(self.Fset.A, state_t) - self.Fset.b) <= 0.001).all():
             print("*********INSIDE TERMINAL SET**************")
-            print(state_t.T - [0, 0, 20, 0, 0, 0, 0, 0, 20, 0, 0])
+            #dx = state_t.T - [0, 0, 20, 0, 0, 0, 0, 0, 20, 0, 0]
+            #u = np.matmul(self.LQRgain, dx.T)
+            delta_x0 = np.array([[state_t[0, 0] - state_t[6, 0], state_t[1, 0] - state_t[7, 0],
+                                  state_t[2, 0], state_t[3, 0], state_t[4, 0], state_t[5, 0], state_t[8, 0], state_t[9, 0], state_t[10, 0]]]).T
+            u = np.matmul(self.LQRgain, (delta_x0 - self.ref2))
+            c = np.matmul((delta_x0 - self.ref2).T,
+                          np.matmul(self.LQRquad, (delta_x0 - self.ref2)))[0, 0]
 
-            u = np.matmul(self.LQRgain, (state_t.T -
-                                         [0, 0, 20, 0, 0, 0, 0, 0, 20, 0, 0]).T)
-            print("GAIN")
-            print(self.LQRgain)
-            print(u)
             u0 = u[0, 0]
             u1 = u[1, 0]
             u2 = u[2, 0]
             u3 = u[3, 0]
-            print(u0)
-            print(u1)
-            print(u2)
 
+            xend = state_t
+            tmax = self.Nmax
+            path = np.zeros((tmax*self.nvar))
+            for i in range(0, tmax):
+                delta_x0 = np.array([[xend[0, 0] - xend[6, 0], xend[1, 0] - xend[7, 0],
+                                      xend[2, 0], xend[3, 0], xend[4, 0], xend[5, 0], xend[8, 0], xend[9, 0], xend[10, 0]]]).T
+
+                uend = np.matmul(self.LQRgain, (delta_x0 - self.ref2))
+                xend = np.matmul(self.A_hrz, xend) + \
+                    np.matmul(self.B_hrz, uend)
+                path[i*(self.nx+self.nu):i *
+                     (self.nx+self.nu)+self.nu, None] = uend
+                path[i*(self.nx+self.nu)+self.nu:(i+1)
+                     * (self.nx+self.nu), None] = xend
+
+            x1 = path[np.arange(4, tmax*self.nvar, self.nvar)]
+            x2 = path[np.arange(10, tmax*self.nvar, self.nvar)]
+            y1 = path[np.arange(5, tmax*self.nvar, self.nvar)]
+            y2 = path[np.arange(11, tmax*self.nvar, self.nvar)]
+
+            dist = np.array(
+                [math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2) for i in range(len(x1))])
+
+            print(dist)
             scale = np.ones((self.mpc_vrt.ni, 1))
+            scale[np.arange(1, tmax*self.mpc_vrt.ny, self.mpc_vrt.ny), 0] = np.maximum(
+                np.minimum((self.h_s * dist -
+                            self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
+                -0.01)
 
-            scale[np.arange(1, self.mpc_vrt.ni, self.mpc_vrt.ny),
-                  0] = np.ones(((self.Nmax)))*-0.01
+            print(scale.T)
+
             N = 0
-            c = 0
 
         else:
-            print("STATE = ")
-            print(state_t.T)
-
             x0 = mpc_x0()
             x0.x1 = state_t[0, 0]
             x0.y1 = state_t[1, 0]
@@ -454,76 +516,82 @@ class MainSimulation(object):
             u0.u3 = input_t[3, 0]
 
             controller_mpc.set_initial(x0, u0)
-            status = controller_mpc.solve()
+            status = controller_mpc.solve_variable_N()
             if (status):
                 # print(type(result.path))
                 print("Failed to solve MPC")
+                print("STATE = ")
+                print(state_t.T)
+                print("* ERROR HORIZONTAL", u0)
+                print("* SOLVE STATUS = ", status)
+                print("* x0 = ", state_t)
+                print("* u0 = ", input_t.T)
+                print("* x1 = ", (np.matmul(self.mpc_hrz.A,
+                                            [state_t]) + np.matmul(self.mpc_hrz.B, input_t)).T)
+                u0_vrt = 0.0
+
             else:
+
                 result = controller_mpc.get_solution()
-                print("INPUT = ", result.u0, result.u1, result.u2, result.u3)
+                print("Solved the control problem! N = %i" % result.N)
                 N = result.N
                 c = result.cost + self.const_hrz
 
                 path = result.path
-                #status, path, N, c = self.mpc_hrz.solve(state_t, input_t)
-                # N = self.Nmax
-                # print("STATE = ", state_t)
-                # print("STATE DIFF = ", state_t-self.predicted_state)
-                x1 = path[np.arange(4, N*self.nvar, self.nvar)]
-                x2 = path[np.arange(10, N*self.nvar, self.nvar)]
-                y1 = path[np.arange(5, N*self.nvar, self.nvar)]
-                y2 = path[np.arange(11, N*self.nvar, self.nvar)]
-                #u0 = path[self.nvar + 0]
-                #u1 = path[self.nvar + 1]
-                #u2 = path[self.nvar + 2]
-                #u3 = path[self.nvar + 3]
 
-                u0 = result.u0
-                u1 = result.u1
-                u2 = result.u2
-                u3 = result.u3
+                # Predict extra values and extend path variable
+                xend = path[N*self.nvar-self.nx:N*self.nvar, None]
+                tmax = min(N+50, self.Nmax)
+                for i in range(N, tmax):
+                    delta_x0 = np.array([[xend[0, 0] - xend[6, 0], xend[1, 0] - xend[7, 0],
+                                          xend[2, 0], xend[3, 0], xend[4, 0], xend[5, 0], xend[8, 0], xend[9, 0], xend[10, 0]]]).T
+
+                    uend = np.matmul(self.LQRgain, (delta_x0 - self.ref2))
+                    xend = np.matmul(self.A_hrz, xend) + \
+                        np.matmul(self.B_hrz, uend)
+                    path[i*(self.nx+self.nu):i *
+                         (self.nx+self.nu)+self.nu, None] = uend
+                    path[i*(self.nx+self.nu)+self.nu:(i+1)
+                         * (self.nx+self.nu), None] = xend
+
+                x1 = path[np.arange(4, tmax*self.nvar, self.nvar)]
+                x2 = path[np.arange(10, tmax*self.nvar, self.nvar)]
+                y1 = path[np.arange(5, tmax*self.nvar, self.nvar)]
+                y2 = path[np.arange(11, tmax*self.nvar, self.nvar)]
+
+                u0 = path[self.nvar+0]
+                u1 = path[self.nvar+1]
+                u2 = path[self.nvar+2]
+                u3 = path[self.nvar+3]
+
                 self.predicted_state = path[range(4, 15)]
-
-                if u0 is None:
-                    print("* ERROR HORIZONTAL", u0)
-                    print("* SOLVE STATUS = ", status)
-                    print("* x0 = ", state_t)
-                    print("* u0 = ", input_t.T)
-                    print("* x1 = ", (np.matmul(self.mpc_hrz.A,
-                                                [state_t]) + np.matmul(self.mpc_hrz.B, input_t)).T)
-                    u0_vrt = 0.0
-
-                #print("NEW VS OLD: ", u0, input_t[0])
-                # print("PRED = ", self.predicted_state)
 
                 dist = np.array(
                     [math.sqrt((x1[i]-x2[i])**2 + (y1[i]-y2[i])**2) for i in range(len(x1))])
 
                 scale = np.ones((self.mpc_vrt.ni, 1))
-                scale[np.arange(1, N*self.mpc_vrt.ny, self.mpc_vrt.ny), 0] = np.maximum(
+                scale[np.arange(1, tmax*self.mpc_vrt.ny, self.mpc_vrt.ny), 0] = np.maximum(
                     np.minimum((self.h_s * dist -
                                 self.h_s*self.d_l)/(self.d_s-self.d_l), self.h_s),
                     -0.01)
 
-                scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
-                      0] = np.ones(((self.Nmax-N)))*-0.01
+                # scale[np.arange(N*self.mpc_vrt.ny+1, self.mpc_vrt.ni, self.mpc_vrt.ny),
+                #      0] = np.ones(((self.Nmax-N)))*-0.01
 
         # ------------------------------------------------------------------------------------------
         # COMPUTE VERTICAL  SOLUTION
         # ------------------------------------------------------------------------------------------
+        self.solve_time.append(time.time()-start_time)
+
         lower_bound = self.mpc_vrt.ineq_l.copy()
         lower_bound[self.mpc_vrt.ne: self.mpc_vrt.ni +
                     self.mpc_vrt.ne] *= scale
-
-        # print("SOLVER = %i, N = %i" % (status, N))
-        # print("1 deltax = ", x1[0:20] - x2[0:20])
 
         uav_ctrl.setpoint.a_ref = u0 / \
             (np.cos(self.uav_state[5, 0]) *
              np.cos(self.uav_state[6, 0]))  # [m/s2]
         ugv_ctrl.setpoint.a_ref = u2 /\
             (np.cos(self.ugv_state[4, 0]))  # [m/s2]
-        # uav_ctrl.setpoint.psi_ref = u1  # [rad/s]
         uav_ctrl.setpoint.yawrate_ref = u1  # [rad/s]
         ugv_ctrl.setpoint.psi_ref = u3  # [rad/s]
 
@@ -536,9 +604,9 @@ class MainSimulation(object):
             print("* VERTICAL ERROR", u0_vrt)
             print("  x0 = ", np.array(
                 [[self.uav_state[2, 0] - 1.3, self.uav_state[5, 0]]]))
-            print("  deltax", x1-x2)
-            print("DISTANCE", dist)
-            print("LB", lower_bound.T)
+            #print("  deltax", x1-x2)
+            #print("DISTANCE", dist)
+            #print("LB", lower_bound.T)
             u0_vrt = 0.0
 
         # h0 = path_vrt[np.arange(1, 3*N2, 3)]
@@ -555,23 +623,29 @@ class MainSimulation(object):
 
         self.last_input = np.array([[u0, u1, u2, u3,
                                      u0_vrt]]).T
-        self.solve_time.append(time.time()-start_time)
         self.solve_horizon.append(N)
         self.solve_horizon2.append(N2)
+        self.N2 = N2
 
         self.solve_cost.append(c)
         self.solve_cost2.append(c2)
 
+        current_time = self.time[(self.itr-1) % self.N_data]
+        predicted_rendezvous[self.mpc_itr, 0] = current_time
+        predicted_rendezvous[self.mpc_itr, 1] = N2
+        predicted_rendezvous[self.mpc_itr, 2] = x1[N2]
+        predicted_rendezvous[self.mpc_itr, 3] = y1[N2]
+
+        if self.mpc_itr in itr_save:
+            idx = itr_save.index(self.mpc_itr)
+            print("SAVING IDX = ", idx, current_time)
+            predicted_path[0: N*self.nvar, idx] = result.path[0: N*self.nvar]
+            itr_time[idx] = self.time[(self.itr-1) % self.N_data]
         if self.xpath is None:
             print("*****************************")
-            self.xpath = [self.time[self.itr % self.N_data], N, path]
+            self.xpath = [current_time, N, path]
 
-        # self.mpc_vrt.update_equality_constraints(0, 1, v1*self.hparam_uav)
-
-        # self.mpc_hrz.update_equality_constraints(1, 4, v1*self.yparam_uav[0])
-        # self.mpc_hrz.update_equality_constraints(1, 5, v1*self.yparam_uav[1])
-
-        # self.mpc_hrz.update_equality_constraints(7, 10, v2*self.yparam_ugv)
+        self.mpc_itr += 1
 
     def send_command(self, vehicle):
         """ Send command to control system of vehicle. """
@@ -684,23 +758,16 @@ class MainSimulation(object):
         self.ugv_state[:, 0] = [ugv_new_state.x, ugv_new_state.y,
                                 ugv_new_state.vx, ugv_state.ax, ugv_new_state.psi]
 
-        # self.uav_state[[2, 5], 0] = self.kalman_vrt.x[:, 0]
-        # self.uav_state[[0, 1, 3, 4, 6, 7], 0] = self.kalman_hrz.x[0: 6, 0]
-        # self.ugv_state[0: 5, 0] = self.kalman_hrz.x[6:, 0]
+        if self.mpc_itr > 0:
 
-        # print("STATES = ")
-        # print(self.uav_state.T)
-        # print(self.ugv_state.T)
-        self.uav_data[self.itr % self.N_data, :] = [*self.uav_state[0:8, 0],
-                                                    *self.last_input[[0, 1, 4], :],
-                                                    uav_state.phi, uav_state.gamma, uav_state.psi,
-                                                    uav_state.ax, uav_state.ay, uav_state.az]
-        self.ugv_data[self.itr % self.N_data, :] = [*self.ugv_state[0:5, 0],
-                                                    *self.last_input[[2, 3], :]]
-
-        self.itr += 1
-
-        self.time[self.itr % self.N_data] = time_now
+            self.uav_data[self.itr % self.N_data, :] = [*self.uav_state[0:8, 0],
+                                                        *self.last_input[[0, 1, 4], :],
+                                                        uav_state.phi, uav_state.gamma, uav_state.psi,
+                                                        uav_state.ax, uav_state.ay, uav_state.az]
+            self.ugv_data[self.itr % self.N_data, :] = [*self.ugv_state[0:5, 0],
+                                                        *self.last_input[[2, 3], :]]
+            self.time[self.itr % self.N_data] = time_now
+            self.itr += 1
 
 
 # -------------------- GUI CLASS -------------------------
@@ -826,6 +893,10 @@ else:
     t1 = sim.time[sim.itr-1]
 
 
+plot_predicted = True
+print(predicted_path)
+
+
 if sim.itr > 0:
     try:
         N = sim.xpath[1]
@@ -850,26 +921,77 @@ if sim.itr > 0:
         timer = np.linspace(sim.xpath[0], sim.xpath[0]+sim.ds*N, N)
     except:
         N = None
-        x1 = np.zeros((1, 1))
-        x2 = np.zeros((1, 1))
-        y1 = np.zeros((1, 1))
-        y2 = np.zeros((1, 1))
-        v1 = np.zeros((1, 1))
-        v2 = np.zeros((1, 1))
-        a1 = np.zeros((1, 1))
-        a2 = np.zeros((1, 1))
-        psi1 = np.zeros((1, 1))
-        psi2 = np.zeros((1, 1))
-        phi1 = np.zeros((1, 1))
-        u0 = np.zeros((1, 1))
-        u1 = np.zeros((1, 1))
-        u2 = np.zeros((1, 1))
-        u3 = np.zeros((1, 1))
-        timer = np.zeros((1, 1))
+        x1 = np.zeros((1, 1))*np.nan
+        x2 = np.zeros((1, 1))*np.nan
+        y1 = np.zeros((1, 1))*np.nan
+        y2 = np.zeros((1, 1))*np.nan
+        v1 = np.zeros((1, 1))*np.nan
+        v2 = np.zeros((1, 1))*np.nan
+        a1 = np.zeros((1, 1))*np.nan
+        a2 = np.zeros((1, 1))*np.nan
+        psi1 = np.zeros((1, 1))*np.nan
+        psi2 = np.zeros((1, 1))*np.nan
+        phi1 = np.zeros((1, 1))*np.nan
+        u0 = np.zeros((1, 1))*np.nan
+        u1 = np.zeros((1, 1))*np.nan
+        u2 = np.zeros((1, 1))*np.nan
+        u3 = np.zeros((1, 1))*np.nan
+        timer = np.zeros((1, 1))*np.nan
 
-    print(len(u0))
-    print(len(x1))
-    print(len(timer))
+    plt.figure("Position", (16, 10))
+    t0 = sim.time[0]
+    plt.plot(sim.uav_data[:, 0], sim.uav_data[:, 1], label='uav')
+    plt.plot(sim.ugv_data[:, 0], sim.ugv_data[:, 1], label='ugv')
+
+    plt.plot(predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 0],
+             predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 0], label='uav_pred')
+
+    plt.plot(predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 0],
+             predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 0], label='ugv_pred')
+
+    plt.plot(predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 1],
+             predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 1], label='uav_pred')
+
+    plt.plot(predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 1],
+             predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 1], label='ugv_pred')
+
+    plt.legend()
+
+    plt.figure("Position/time", (16, 10))
+    t0 = sim.time[0]
+    plt.plot(sim.time-t0,
+             sim.uav_data[:, 0]-sim.ugv_data[:, 0], label='deltax')
+    plt.plot(sim.time-t0,
+             sim.uav_data[:, 1]-sim.ugv_data[:, 1], label='deltay')
+
+    t_pred0 = np.linspace(itr_time[0], itr_time[0]+sim.ds*sim.Nmax, sim.Nmax)
+    plt.plot(t_pred0-t0,
+             predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 0] -
+             predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 0], label='deltax_pred')
+
+    plt.plot(t_pred0-t0,
+             predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 0] -
+             predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 0], label='deltay_pred')
+
+    t_pred1 = np.linspace(itr_time[1], itr_time[1]+sim.ds*sim.Nmax, sim.Nmax)
+    plt.plot(t_pred1-t0,
+             predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 1] -
+             predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 1], label='deltax_pred')
+
+    plt.plot(t_pred1-t0,
+             predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 1] -
+             predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 1], label='deltay_pred')
+
+    t_pred2 = np.linspace(itr_time[2], itr_time[2]+sim.ds*sim.Nmax, sim.Nmax)
+    plt.plot(t_pred2-t0,
+             predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 2] -
+             predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 2], label='deltax_pred')
+
+    plt.plot(t_pred2-t0,
+             predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 2] -
+             predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 2], label='deltay_pred')
+
+    plt.legend()
 
     plt.figure("STATES", (16, 10))
     t0 = sim.time[0]
@@ -1012,10 +1134,10 @@ if sim.itr > 0:
     ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
     ax2.plot(sim.solve_horizon, color='green')
     ax2.scatter(np.arange(0, len(sim.solve_horizon), dtype='float'),
-                sim.solve_horizon, color='green')
+                sim.solve_horizon, color='green', label='Horizontal')
     ax2.plot(sim.solve_horizon2, color='orange')
     ax2.scatter(np.arange(0, len(sim.solve_horizon), dtype='float'),
-                sim.solve_horizon2, color='orange')
+                sim.solve_horizon2, color='orange', label='Vertical')
 
     distance = np.sqrt(np.power(sim.uav_data[:, 0]-sim.ugv_data[:, 0], 2) + np.power(
         sim.uav_data[:, 1]-sim.ugv_data[:, 1], 2))
@@ -1023,10 +1145,13 @@ if sim.itr > 0:
 
     ax2.set_ylabel('Horizon', color='green')
     ax2.tick_params(axis='y', labelcolor='green')
+    plt.legend()
     plt.title("MPC solve time and horizon")
     plt.tight_layout()  # otherwise the right y-label is slightly clipped
 
     plt.figure("MPC COST", (16, 10))
+    print(sim.solve_cost)
+    print(len(sim.solve_cost))
     plt.plot(sim.solve_cost, color='green', label='Horizontal')
     plt.scatter(np.arange(0, len(sim.solve_cost), dtype='float'),
                 sim.solve_cost, color='green')
@@ -1088,10 +1213,49 @@ now = datetime.now()  # current date and time
 date_time = now.strftime("%y%m%d_%H-%M-%S")
 print("date and time:", date_time)
 
-# np.savetxt("uav" + date_time + ".csv", sim.uav_data, delimiter=",")
-# np.savetxt("ugv" + date_time + ".csv", sim.ugv_data, delimiter=",")
+print(sim.time.shape)
+print(sim.uav_data.shape)
+uav_save = np.hstack((sim.time[:, np.newaxis]-t0, sim.uav_data))
+ugv_save = np.hstack((sim.time[:, np.newaxis]-t0, sim.ugv_data))
+
+uav_save.shape
+
+np.savetxt("uav" + date_time + ".csv", uav_save, delimiter=",")
+np.savetxt("ugv" + date_time + ".csv", ugv_save, delimiter=",")
+
+
 # np.savetxt("time" + date_time + ".csv", sim.time, delimiter=",")
+
+print(predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 0].shape)
+print(sim.uav_data.shape)
+predicted_path_save = np.array([
+    t_pred0,
+    predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 0],
+    predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 0],
+    predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 0],
+    predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 0],
+    t_pred1,
+    predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 1],
+    predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 1],
+    predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 1],
+    predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 1],
+    t_pred2,
+    predicted_path[np.arange(4, sim.Nmax*sim.nvar, sim.nvar), 2],
+    predicted_path[np.arange(5, sim.Nmax*sim.nvar, sim.nvar), 2],
+    predicted_path[np.arange(10, sim.Nmax*sim.nvar, sim.nvar), 2],
+    predicted_path[np.arange(11, sim.Nmax*sim.nvar, sim.nvar), 2],
+]).T
+
+print(predicted_rendezvous)
 
 solver = np.array([sim.solve_horizon, sim.solve_horizon2,
                    sim.solve_time, sim.solve_cost, sim.solve_cost2]).T
 np.savetxt("solver" + date_time + ".csv", solver, delimiter=",")
+
+
+np.savetxt("predicted_path" + date_time + ".csv",
+           predicted_path_save, delimiter=",")
+
+
+np.savetxt("predicted_rendezvous" + date_time + ".csv",
+           predicted_rendezvous, delimiter=",")

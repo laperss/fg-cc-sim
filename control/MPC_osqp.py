@@ -233,6 +233,7 @@ class ControllerOSQP(object):
 
         return res.info.status_val, res.x, self.N, res.info.obj_val
 
+
 class ControllerOSQPRobust(ControllerOSQP):
     def reachability_matrices(self, W, Xf, Y0, p):
         """ Compute the worst-case disturbances with a linear feedback.
@@ -528,14 +529,13 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
         print(x0)
         print(u0)
         status, path, N, c = self.solve(x0, u0, time_limit, lb=lb)
-        print("**********************************\n********************************\n\nINITIAL HORIZON (%i): %i" % (self.nx, N))
         return status, path, N, c
 
     def solve(self, x0, u0, time_limit=0.05, dN=1, lb=None):
         init_time = time.time()
         N0 = self.N0  # Old value
 
-        Nmin = 30
+        Nmin = 3
 
         N1 = max(self.N0-1, Nmin)
         res1 = self.solve_N(x0, u0, N1, lb)
@@ -543,10 +543,10 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
         if (res1.info.status_val != 1):
             print("*** WARNING: DOES NOT FULFILL THE CONSTRAINTS ***",
                   res1.info.status_val)
-            print("* Have to increase horizon")
+            #print("* Have to increase horizon")
             feasible = False
             while not feasible and N1 <= self.N and time.time() - init_time < time_limit:
-                print("Solve with N = ", N1)
+                #print("Solve with N = ", N1)
                 N1 += 2
                 res1 = self.solve_N(x0, u0, N1, lb)
                 if (res1.info.status_val == 1):
@@ -562,17 +562,8 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
             if N1 > Nmin:
                 cmin = res1.info.obj_val + N1
 
-                # Decrease in accordance with predicted path
-                # print("n = %i:   N = %i,  c = %f <= %f"
-                #      % (self.nx, N1, cmin, self.cmin_pred))
-                # print(x0)
-                # print(self.xpred.T)
-                # print(self.xpred.T - x0)
-
                 if cmin <= self.cmin_pred:
                     pass
-                # print("n = %i:   N = %i,  c = %f <= %f"
-                 #         % (self.nx, N1, cmin, self.cmin_pred))
 
                 else:
                     # Try with previous horizon
@@ -580,53 +571,22 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
                     res_new = self.solve_N(x0, u0, Nnew, lb)
                     cnew = res_new.info.obj_val + Nnew
 
-                    #path_new = res_new.x
-                    # u0_ = path_new[np.arange(
-                    #    0, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                    # u1_ = path_new[np.arange(
-                    #    1, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                    # u2_ = path_new[np.arange(
-                    #    2, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                    # u3_ = path_new[np.arange(
-                    #    3, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                    # print("------------------------------------------")
-                    # print(u0_)
-                    # print(u1_)
-                    # print(u2_)
-                    # print(u3_)
                     # Must increase horizon
                     if cnew <= cmin:
-                        print("* Minimum found by increase")
-                        while time.time() - init_time < time_limit and cnew <= cmin and Nnew < self.N:
-                            if cnew <= self.cmin_pred:
-                                break
-                            else:
-                                # Save these values, optimal for now
-                                cmin = cnew
-                                N1 = Nnew
-                                res1 = res_new
-                                print("\t* New optimal N: ", N1, cmin)
+                        #print("* Minimum found by increase %i" % self.nx)
+                        while cnew <= cmin and Nnew < self.N:
+                            # Save these values, optimal for now
+                            cmin = cnew
+                            N1 = Nnew
+                            res1 = res_new
+                            #print("\t* New optimal N: ", N1, cmin)
 
+                            if (time.time() - init_time < time_limit):
                                 Nnew += 1
                                 res_new = self.solve_N(x0, u0, Nnew, lb)
                                 cnew = res_new.info.obj_val + Nnew
-
-                                #path_new = res_new.x
-
-                                # u0_ = path_new[np.arange(
-                                #    0, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                                # u1_ = path_new[np.arange(
-                                #    1, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                                # u2_ = path_new[np.arange(
-                                #    2, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                                # u3_ = path_new[np.arange(
-                                #    3, Nnew*(self.nx+self.nu), (self.nx+self.nu))]
-                                # print(
-                                #    "-------------NEW N = %i: c = %f---------------------" % (Nnew, cnew))
-                                # print(u0_)
-                                # print(u1_)
-                                # print(u2_)
-                                # print(u3_)
+                            else:
+                                break
 
                     else:
                         # print("Minimum found by decrease")
@@ -635,7 +595,7 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
                         cnew = res_new.info.obj_val + Nnew
 
                         if self.cmin_pred == 0:
-                            while time.time() - init_time < time_limit and cnew <= cmin and N1 >= Nmin:
+                            while cnew <= cmin and N1 >= Nmin:
                                 # print("\t N = %i, cmin = %f" % (N1, cmin))
                                 if (res1.info.status_val == 1):
                                     if cnew <= cmin:
@@ -644,10 +604,13 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
                                         cmin = cnew
                                         N1 = Nnew
 
-                                        Nnew -= 1
-                                        res_new = self.solve_N(
-                                            x0, u0, Nnew, lb)
-                                        cnew = res_new.info.obj_val + Nnew
+                                        if (time.time() - init_time < time_limit):
+                                            Nnew -= 1
+                                            res_new = self.solve_N(
+                                                x0, u0, Nnew, lb)
+                                            cnew = res_new.info.obj_val + Nnew
+                                        else:
+                                            break
 
                                     else:
                                         N1 = N1 + 1
@@ -659,7 +622,7 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
                                     break
 
                         else:
-                            while time.time() - init_time < time_limit and cnew < cmin:
+                            while cnew < cmin:
                                 if (res1.info.status_val == 1):
                                     if cnew < self.cmin_pred:
                                         break
@@ -669,10 +632,13 @@ class ControllerOSQPRobustVariableHorizon(ControllerOSQPRobust):
                                         cmin = cnew
                                         N1 = Nnew
 
-                                        Nnew -= 1
-                                        res_new = self.solve_N(
-                                            x0, u0, Nnew, lb)
-                                        cnew = res_new.info.obj_val + Nnew
+                                        if (time.time() - init_time < time_limit):
+                                            Nnew -= 1
+                                            res_new = self.solve_N(
+                                                x0, u0, Nnew, lb)
+                                            cnew = res_new.info.obj_val + Nnew
+                                        else:
+                                            break
 
                                 else:
                                     break
