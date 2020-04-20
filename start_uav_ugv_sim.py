@@ -3,8 +3,7 @@
 The main class of the cooperative control simulation.
 The script starts the GUI from which commands can be sent to FlightGear,
 and starts the control thread.
-The control thread here computes a rendezvous trajectory dor the UAV and UGV using the MPC
-found in control/MPC.
+The control thread here computes a rendezvous trajectory dor the UAV and UGV using a simple PID controller.
 """
 from __future__ import print_function
 import sys
@@ -19,7 +18,7 @@ import tempfile
 from PyQt5 import QtGui, QtCore
 from fgpython import SimulationGUI, FGTelnetConnection, FGSocketConnection
 #from control import MPC, Positioner
-from control import Positioner
+from control import Positioner, ControllerPID
 
 # MAIN PROGRAM PARAMETERS
 # ----------------------------------------------------------
@@ -111,33 +110,13 @@ class MainSimulation(object):
     ap_mode = 'HOLD'
     uav_state = []
     ugv_state = []
-    plot_it = 0
-    past_inputs = [[0, 0, 0, 0], [0, 0, 0, 0],
-                   [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
     final_stage = False
-    d_safe = 1.8
-    deltax = []
-    deltay = []
-    deltah = []
-    velocity_uav = []
-    velocity_ugv = []
-    acceleration_uav = []
-    acceleration_ugv = []
-    acceleration_uav_des = []
-    acceleration_ugv_des = []
-    heading_uav = []
-    heading_ugv = []
-    heading_uav_des = []
-    heading_ugv_des = []
-    uav_path = []
-    ugv_path = []
-    ta = []
-    tg = []
-    start_final = None
+    v_ref = 20.0
 
     def __init__(self):
         self.ds = 0.18
         self.init_time = time.time()
+        self.PID = ControllerPID(self.v_ref, 0.1, 0.1, 0.05, 0.1)
 
     def start_control_thread(self):
         """ Start thread for sending current control commands"""
@@ -170,8 +149,10 @@ class MainSimulation(object):
                  + [self.ugv_state[i] for i in [0, 1, 2, 3, 4]])
 
         # Current input
-        input_ = [uav_ctrl.setpoint['acceleration'], math.radians(uav_ctrl.setpoint['heading']),
-                  ugv_ctrl.setpoint['acceleration'], math.radians(ugv_ctrl.setpoint['heading'])]
+        input_ = [uav_ctrl.setpoint['acceleration'],
+                  math.radians(uav_ctrl.setpoint['heading']),
+                  ugv_ctrl.setpoint['acceleration'],
+                  math.radians(ugv_ctrl.setpoint['heading'])]
 
         self.compute_pid()
 
@@ -185,24 +166,15 @@ class MainSimulation(object):
         deltav = (self.uav_state[3]*math.sin(self.uav_state[6])
                   - self.ugv_state[2]*math.sin(self.ugv_state[4]))
 
-        # HEADING
-        heading_uav = (0 - 0.02*deltay - 0.0001*deltav)*180/3.14      # [deg]
-        heading_ugv = (0 + 0.005*deltay - 0.00001*deltav)*180/3.14    # [deg]
-        uav_ctrl.setpoint['heading'] = max(min(5, heading_uav), -5)
-        ugv_ctrl.setpoint['heading'] = max(min(5, heading_ugv), -5)
+        v_uav, v_ugv = self.PID.get_control(deltax, deltay, deltav)
 
-        # VELOCITY
-        v_uav = 20 - 0.1*deltax - 0.1*deltau  # m/s
-        v_ugv = 20 + 0.05*deltax + 0.1*deltau  # m/s
-        uav_ctrl.setpoint['velocity'] = max(min(28, v_uav), 18)     # [m/s]
-        ugv_ctrl.setpoint['velocity'] = max(min(30, v_ugv), 0)     # [m/s]
-        x = np.array([deltax, deltay,
-                      self.uav_state[3], self.uav_state[4], self.uav_state[6],
-                      self.ugv_state[2], self.ugv_state[3], self.ugv_state[4]])[np.newaxis].T
-        ans = not False in np.less_equal(np.dot(A, x), b)
-        if (ans):
-            self.start_final = [[len(self.deltax), self.deltax[-1]],
-                                [len(self.deltay), self.deltay[-1]]]
+        uav_ctrl.setpoint['velocity'] = max(min(28.0, v_uav), 18.0)     # [m/s]
+        ugv_ctrl.setpoint['velocity'] = max(min(30.0, v_ugv), 0) # [m/s]
+
+
+        # Switch to landing mode after certain point
+        # Change condition inside parenthesis. 
+        if (abs(deltax) < 10):
             uav_.landing_mode()
             ugv_.landing_mode()
             self.final_stage = True
@@ -264,27 +236,6 @@ class MainSimulation(object):
 
         self.uav_state = uav
         self.ugv_state = ugv
-
-        self.deltah.append(uav[2])
-        self.deltax.append(uav[0] - ugv[0])
-        self.deltay.append(uav[1] - ugv[1])
-
-        self.velocity_uav.append(uav[3])
-        self.velocity_ugv.append(ugv[2])
-
-        self.acceleration_uav.append(uav[4])
-        self.acceleration_ugv.append(ugv[3])
-        self.acceleration_uav_des.append(uav_ctrl.setpoint['acceleration'])
-        self.acceleration_ugv_des.append(ugv_ctrl.setpoint['acceleration'])
-
-        self.heading_uav.append(math.degrees(uav[6]))
-        self.heading_ugv.append(math.degrees(ugv[4]))
-
-        self.heading_uav_des.append(uav_ctrl.setpoint['heading'])
-        self.heading_ugv_des.append(ugv_ctrl.setpoint['heading'])
-
-        self.ta.append(uav[-1])
-        self.tg.append(ugv[-1])
 
         if uav[2] < 1.6:
             print("SUCCESSFUL LANDING")
