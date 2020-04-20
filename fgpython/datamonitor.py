@@ -13,10 +13,9 @@ import sys
 import os
 import pickle
 import time
-from PyQt4 import QtCore, QtGui
 import pyqtgraph.exporters
 import pyqtgraph as pg
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import pandas as pd
 
 TITLE = 'Data Visualization'
@@ -262,7 +261,7 @@ class VisualizationGraph(QtGui.QWidget):
 
 
 app = QtGui.QApplication(sys.argv)
-gui = VisualizationGraph([['UAV', UAV_FILE], ['USV', USV_FILE]])
+gui = VisualizationGraph([['UAV', UAV_FILE], ['UGV', UGV_FILE]])
 gui.show()
 app.exec_()
 
