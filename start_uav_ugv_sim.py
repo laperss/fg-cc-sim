@@ -18,18 +18,8 @@ import matplotlib.pyplot as plt
 import tempfile
 from PyQt5 import QtGui, QtCore
 from fgpython import SimulationGUI, FGTelnetConnection, FGSocketConnection
-from control import MPC, Positioner
-
-
-# REACHABLE SET
-# ----------------------------------------------------------
-with open("control/A.csv", "r") as f:
-    readerA = csv.reader(f, delimiter=",")
-    A = np.array(list(readerA)).astype("float")
-with open("control/B.csv", "r") as f:
-    readerB = csv.reader(f, delimiter=",")
-    b = np.array(list(readerB)).astype("float")
-
+#from control import MPC, Positioner
+from control import Positioner
 
 # MAIN PROGRAM PARAMETERS
 # ----------------------------------------------------------
@@ -147,24 +137,7 @@ class MainSimulation(object):
 
     def __init__(self):
         self.ds = 0.18
-        self.mpc, self.mpc_alt = self.initalize_mpc()
         self.init_time = time.time()
-
-    def initalize_mpc(self):
-        """ Initialize the two MPC with the correct values """
-
-        T = 38
-        mpc = MPC.Controller(MPC.state_constraints_lat,
-                             MPC.input_constraints_lat,
-                             MPC.A_lat, MPC.B_lat, T, self.ds)
-
-        mpc_alt = MPC.Controller(MPC.state_constraints_lon,
-                                 MPC.input_constraints_lon,
-                                 MPC.A_lon, MPC.B_lon, T, self.ds)
-        MPC.add_align_constraints(mpc)
-        MPC.add_alt_constraints(mpc_alt)
-
-        return mpc, mpc_alt
 
     def start_control_thread(self):
         """ Start thread for sending current control commands"""
@@ -200,16 +173,7 @@ class MainSimulation(object):
         input_ = [uav_ctrl.setpoint['acceleration'], math.radians(uav_ctrl.setpoint['heading']),
                   ugv_ctrl.setpoint['acceleration'], math.radians(ugv_ctrl.setpoint['heading'])]
 
-        # Save the old input values
-        # Vector: [x(t-4), x(t-3), x(t-2),..., x(t-1), x(t)]
-        self.past_inputs[0:-1] = self.past_inputs[1:]
-        self.past_inputs[-1] = [0,
-                                math.radians(uav_ctrl.setpoint['heading']), 0, 0]
-
-        if self.final_stage:
-            self.optimize_final_path(state, input_)
-        else:
-            self.compute_pid()
+        self.compute_pid()
 
     def compute_pid(self):
         """ Computes control inputs that will drive the system to the final stage.
@@ -222,10 +186,10 @@ class MainSimulation(object):
                   - self.ugv_state[2]*math.sin(self.ugv_state[4]))
 
         # HEADING
-        # heading_uav = (0 - 0.02*deltay - 0.0001*deltav)*180/3.14      # [deg]
-        # heading_ugv = (0 + 0.005*deltay - 0.00001*deltav)*180/3.14    # [deg]
-        # uav_ctrl.setpoint['heading'] = max(min(5, heading_uav), -5)
-        # ugv_ctrl.setpoint['heading'] = max(min(5, heading_ugv), -5)
+        heading_uav = (0 - 0.02*deltay - 0.0001*deltav)*180/3.14      # [deg]
+        heading_ugv = (0 + 0.005*deltay - 0.00001*deltav)*180/3.14    # [deg]
+        uav_ctrl.setpoint['heading'] = max(min(5, heading_uav), -5)
+        ugv_ctrl.setpoint['heading'] = max(min(5, heading_ugv), -5)
 
         # VELOCITY
         v_uav = 20 - 0.1*deltax - 0.1*deltau  # m/s
@@ -243,77 +207,6 @@ class MainSimulation(object):
             ugv_.landing_mode()
             self.final_stage = True
 
-    def optimize_final_path(self, state_t, input_t):
-        """ Computes the optimal path for the final stage of the landing
-            The method is MPC with two spearate controllers.
-            Inputs: state_t The state at time t
-                    input_t The input at time t """
-        try:
-            # Save the past 4 UAV heading inputs
-            self.mpc.u_delay.value = self.past_inputs[:-1]
-            start_time = time.time()
-            self.mpc.solve(state_t, input_t)
-
-            # Retrieve the computed inputs
-            inputs = self.mpc.u[:, 1].value
-
-            uav_ctrl.setpoint['acceleration'] = inputs[0]     # [m/s2]
-            ugv_ctrl.setpoint['acceleration'] = inputs[2]     # [m/s2]
-            uav_ctrl.setpoint['heading'] = math.degrees(
-                inputs[1])     # [rad/s]
-            ugv_ctrl.setpoint['heading'] = math.degrees(
-                inputs[3])     # [rad/s]
-
-            x1 = self.mpc.x[0, :].value  # uav x
-            x2 = self.mpc.x[1, :].value  # uav y
-            x6 = self.mpc.x[5, :].value  # ugv x
-            x7 = self.mpc.x[6, :].value  # ugv y
-
-            if self.uav_path == []:
-                va = self.mpc.x[2, :].value  # uav v
-                aa = self.mpc.x[3, :].value  # uav a
-                pa = self.mpc.x[4, :].value  # uav psi
-                vg = self.mpc.x[7, :].value  # ugv v
-                ag = self.mpc.x[8, :].value  # ugv a
-                pg = self.mpc.x[9, :].value  # ugv psi
-
-                pap = self.mpc.u[1, :].value  # ugv psi
-                pgp = self.mpc.u[3, :].value  # ugv psi
-
-                self.uav_path = [va, aa, x1, x2, pa, pap]
-                self.ugv_path = [vg, ag, x6, x7, pg, pgp]
-
-            distance = [math.sqrt((x1[i]-x6[i])**2 + (x2[i]-x7[i])**2)
-                        for i in range(self.mpc.T)]
-
-            b1 = [int(distance[i] < self.d_safe) for i in range(self.mpc.T)]
-            b2 = [int(not distance[i] < self.d_safe)
-                  for i in range(self.mpc.T)]
-
-            self.mpc_alt.b1.value = b1
-            self.mpc_alt.b2.value = b2
-            self.mpc_alt.distance.value = distance
-
-            print("time: ", time.time()-start_time)
-        except:
-            print("ERROR OCCURED: NO SOLUTION FOUND (LAT)")
-            uav_.pause()
-            ugv_.pause()
-            self.stop_control_thread()
-
-        try:
-            result = self.mpc_alt.solve([self.uav_state[2] - 1.3,
-                                         self.uav_state[5]],
-                                        [math.radians(uav_ctrl.setpoint['gamma'])])
-            u = self.mpc_alt.u[0, 1].value
-            uav_ctrl.setpoint['gamma'] = math.degrees(u)
-        except:
-            print("ERROR OCCURED: NO SOLUTION FOUND (LON)")
-
-            uav_ctrl.setpoint['gamma'] = 0.0
-            # uav_ctrl.toggle_pause(1)
-            # ugv_ctrl.toggle_pause(1)
-            # self.stop_control_thread()
 
     def send_command(self, vehicle):
         """ Send command to control system of vehicle. """

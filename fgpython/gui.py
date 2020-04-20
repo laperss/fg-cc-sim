@@ -8,7 +8,6 @@ import os
 from PyQt5 import QtCore, QtGui
 import pyqtgraph.exporters
 import pyqtgraph as pg
-import pandas as pd
 
 
 def run_fg_script(script, vehicle):
