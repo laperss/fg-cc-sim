@@ -31,7 +31,7 @@
 
       <!-- 3: altitude (ft)-->
       <chunk>
-	<name>/fdm/jsbsim/position/h-agl-ft</name>
+	<name>h-agl-ft</name>
 	<node>/fdm/jsbsim/position/h-agl-ft</node>
 	<type>float</type>
 	<format>%03.4f</format>
@@ -39,7 +39,7 @@
 
       <!-- 4: true airspeed -->
       <chunk>
-	<name>/fdm/jsbsim/velocities/vt-fps</name>
+	<name>vt-fps</name>
 	<node>/fdm/jsbsim/velocities/vt-fps</node>
 	<type>float</type>
 	<format>%03.3f</format>
@@ -47,7 +47,7 @@
 
       <!-- 5: acceleration -->
       <chunk>
-	<name>/fdm/jsbsim/accelerations/udot-ft_sec2</name>
+	<name>udot-ft_sec2</name>
 	<node>/fdm/jsbsim/accelerations/udot-ft_sec2</node>
 	<type>float</type>
 	<format>%03.3f</format>
@@ -63,7 +63,7 @@
 
       <!-- Latitude (deg)-->
       <chunk>
-	<name>/fdm/jsbsim/position/lat-gc-deg</name>
+	<name>lat-gc-deg</name>
 	<node>/fdm/jsbsim/position/lat-gc-deg</node>
 	<type>float</type>
 	<format>%03.10f</format>
@@ -71,14 +71,14 @@
 
       <!-- Longitude (deg)-->
       <chunk>
-	<name>/fdm/jsbsim/position/long-gc-deg</name>
+	<name>long-gc-deg</name>
 	<node>/fdm/jsbsim/position/long-gc-deg</node>
 	<type>float</type>
 	<format>%03.5f</format>
       </chunk>
       
       <chunk>
-	<name>/fdm/jsbsim/velocities/vg-fps</name>
+	<name>velocities/vg-fps</name>
 	<node>/fdm/jsbsim/velocities/vg-fps</node>
 	<type>float</type>
 	<format>%03.3f</format>

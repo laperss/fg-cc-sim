@@ -12,13 +12,11 @@ class ControllerPID(object):
 
     def get_control(self, deltax, deltay, deltau, deltav=0.0):
         # HEADING
-        # heading_uav = (0 - 0.02*deltay - 0.0001*deltav)*180/3.14      # [deg]
-        # heading_ugv = (0 + 0.005*deltay - 0.00001*deltav)*180/3.14    # [deg]
-        # uav_ctrl.setpoint['heading'] = max(min(5, heading_uav), -5)
-        # ugv_ctrl.setpoint['heading'] = max(min(5, heading_ugv), -5)
+        heading_uav = (0 - 0.01*deltay - 0.0001*deltav)*180/3.14      # [deg]
+        heading_ugv = (0 + 0.005*deltay - 0.00001*deltav)*180/3.14    # [deg]
 
         # VELOCITY
         v_uav = self.vref - self.p_uav*deltax - self.d_uav*deltau  # m/s
         v_ugv = self.vref + self.p_ugv*deltax + self.d_ugv*deltau  # m/s
 
-        return v_uav, v_ugv
+        return v_uav, v_ugv, heading_uav, heading_ugv

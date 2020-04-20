@@ -28,8 +28,6 @@ def run_fg_script(script, vehicle):
     command.append('--prop:/engines/engine[1]/running=true')
     command.append('--prop:/engines/engine[2]/running=true')
     command.append('--prop:/engines/engine[3]/running=true')
-    print("Attempt to start flightgear: ")
-    print(*command, sep="  ")
 
     proc = subprocess.Popen(command, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, preexec_fn=os.setsid)
@@ -44,7 +42,9 @@ class SimulationGUI(QtGui.QWidget):
         landing simulation. """
     simulation_running = False
     pause_sim = False
-
+    uav_file_exists = False
+    ugv_file_exists = False
+    
     def __init__(self, vehicles):
         QtGui.QWidget.__init__(self)
         self.setGeometry(0, 0, 300, 700)
@@ -189,7 +189,7 @@ class SimulationGUI(QtGui.QWidget):
 # :::::::::::::::::: BUTTONS :::::::::::::::::::::::::::
     def reset(self):
         """ Reset JSBSim """
-        print("Restart vehicle simulations (NOT WORKING)")
+        print("* Restart vehicle simulations (NOT WORKING)")
         return
         # OLD CODE. FIX!
         if self.uav_file_exists:
@@ -210,14 +210,14 @@ class SimulationGUI(QtGui.QWidget):
     def pause(self):
         """ Pause/Resume FlightGear  """
         if self.pause_sim:
-            print("Resume vehicle simulations")
+            print("* Resume vehicle simulations")
             for vehicle in self.vehicles:
                 vehicle.command.resume()
             self.pause_sim = False
             self.pause_btn.setText("Pause")
 
         else:
-            print("Pause vehicle simulations")
+            print("* Pause vehicle simulations")
             for vehicle in self.vehicles:
                 vehicle.command.pause()
             self.pause_sim = True
@@ -244,7 +244,7 @@ class SimulationGUI(QtGui.QWidget):
 
     def simulation_start_stop(self):
         """ Callback for simulation button """
-        print("Simulation: function simulation_start_stop()")
+        print("* Simulation: function simulation_start_stop()")
         if self.simulation_running:
             self.simulation_running = False
             self.simulation_btn.setText("Start Simulation")
@@ -295,16 +295,15 @@ class SimulationGUI(QtGui.QWidget):
             vehicle.running = False
 
     def stop_control(self):
-        print("Stop control system")
+        print("* Stop control system")
 # :::::::::::::::::: RADIO BTN :::::::::::::::::::::::::::
 
     def toggle_mode(self, btn):
         """ Callback for mode button group. Changes the
             mode of the system. """
-        print("Toggle flight mode")
         name = btn.objectName()
+        print("* Toggle flight mode: ", name)
         if name == 'Align':
-            print("Initiate align")
             self.ap_mode = 'ALIGN'
             self.sim.ap_mode = 'ALIGN'
             for vehicle in self.vehicles:
@@ -339,19 +338,19 @@ class SimulationGUI(QtGui.QWidget):
 
     def toggle_ctrl(self, btn):
         """ Callback for control button group. Changes the control mode of the system. """
-        print("Toggle control mode")
+        print("* Toggle control mode: ", end='')
         name = btn.objectName()
         for uav in [vehicle for vehicle in self.vehicles if vehicle.type == 'uav']:
             if name == 'PID':
-                print("Enable PID control system")
+                print("\tEnable PID control system")
                 uav.command.toggle_tecs(0)
             elif name == 'TECS':
-                print("Enable TECS control system")
+                print("\tEnable TECS control system")
                 uav.command.toggle_tecs(1)
 
     def toggle_hold(self, btn):
         """ Callback for hold button group. Changes the hold mode of the system. """
-        print("Toggle roll control")
+        print("* Toggle roll control")
         name = btn.objectName()
         for uav in [vehicle for vehicle in self.vehicles if vehicle.type == 'uav']:
             if name == 'Wings-level':

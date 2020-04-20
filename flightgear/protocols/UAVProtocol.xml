@@ -32,7 +32,7 @@
    <!-- 3: altitude (ft)-->
 
    <chunk>
-    <name>/fdm/jsbsim/position/h-agl-ft</name>
+    <name>h-agl-ft</name>
     <node>/fdm/jsbsim/position/h-agl-ft</node>
     <type>float</type>
     <format>%03.4f</format>

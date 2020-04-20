@@ -20,6 +20,8 @@ import math
 import _thread
 import socket
 import re
+import xml.etree.ElementTree as ET
+import os 
 
 RAD2DEG = 57.2957795
 DEG2RAD = 0.0174532925
@@ -41,14 +43,26 @@ class FGSocketConnection(object):
 
     def __init__(self, input_port, output_port, in_protocol='InProtocol', out_protocol='OutProtocol'):
         self.data = []
-        self.setpoint = {'altitude': 0, 'velocity': 20,
-                         'heading': 0, 'acceleration': 0, 'gamma': 0}
+
         self.output_port = output_port
         self.input_port = input_port
         self.input_protocol = in_protocol
         self.output_protocol = out_protocol
         self.update = False
+
+        path = os.path.dirname(os.path.abspath(__file__))
+        output_script = os.path.join(path, '../flightgear/protocols/'+out_protocol+'.xml')
+        input_script = os.path.join(path, '../flightgear/protocols/'+in_protocol+'.xml')
+        input_root = ET.parse(input_script).getroot()
+        self.setpoint = dict()
+        for chunk in input_root[0][0].findall('chunk'):
+            name = chunk.find('name').text
+            self.setpoint[name] = 0.0
+
         self.setup_sockets()
+
+    def update_setpoint(prop, value, scale=1.0, bias=0.0):
+        self.setpoint[prop] = value*scale + bias
 
     def setup_sockets(self):
         """ Setup the socket communication """
@@ -77,13 +91,11 @@ class FGSocketConnection(object):
         """ Separates data and updates the "data" variable"""
         while self.update == True:
             data, addr = self.socket_in.recvfrom(2048)
-            # print(data)
             data = data.decode()
             data.rstrip('\n')
             if not data:
                 break
             self.data = [float(i) for i in re.split(r'\t+', data)]
-            # print(self.data)
 
     def get_state(self, idx):
         """ Return the current vehicle state """

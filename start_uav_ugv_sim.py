@@ -22,7 +22,6 @@ from control import Positioner, ControllerPID
 
 # MAIN PROGRAM PARAMETERS
 # ----------------------------------------------------------
-# ORIGIN = (42.186702238384, -71.00457277413)
 ORIGIN_FG = (42.37824878120545, -71.00457885362507)
 HEADING = 199.67
 POSITIONER = Positioner(ORIGIN_FG, HEADING)
@@ -34,15 +33,14 @@ FEET2M = 0.3048
 PATH = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(PATH, 'flightgear/run_flightgear.sh')
 
-# Telnet connection for commands
-ugv_ = FGTelnetConnection('localhost', 6600)
-uav_ = FGTelnetConnection('localhost', 6500)
+
+
 
 # Socket connection for control
 FGSocketConnection.heading = HEADING
 ugv_ctrl = FGSocketConnection(5526, 5525, 'InputProtocol', 'UGVProtocol')
 uav_ctrl = FGSocketConnection(5515, 5514, 'InputProtocol', 'UAVProtocol')
-uav_ctrl.setpoint['altitude'] = 18
+uav_ctrl.setpoint['altitude'] = 25
 
 
 # Vehicle class
@@ -69,37 +67,37 @@ uav.control_variables = {'Altitude': {'range': (0, 100), 'value': 18},
                          'Heading': {'range': (-180, 180), 'value': 0},
                          'Acceleration': {'range': (-5, 5), 'value': 0},
                          'Gamma': {'range': (-15, 15), 'value': 0}}
-uav.command = uav_
-ugv.command = ugv_
+
+# Telnet connection for commands
+uav.command = FGTelnetConnection('localhost', 6500)
+ugv.command = FGTelnetConnection('localhost', 6600)
 uav.control = uav_ctrl
 ugv.control = ugv_ctrl
 
+# Multiplayer ports
 uav.mp_output_port = 5002
 uav.mp_input_port = 5000
 ugv.mp_output_port = 5000
 ugv.mp_input_port = 5002
 
 uav.arguments = {'aircraft': 'Rascal110-JSBSim',
-                 # 'lat': UAV_START[0] , 'lon':UAV_START[1],
-                 'prop:/position/ref-origin-lat': ORIGIN_FG[0],
-                 'prop:/position/ref-origin-lon': ORIGIN_FG[1],
+                 'prop:/fdm/jsbsim/positioning/ref-origin-lat': ORIGIN_FG[0],
+                 'prop:/fdm/jsbsim/positioning/ref-origin-lon': ORIGIN_FG[1],
                  'lat': UAV_START[0], 'lon': UAV_START[1],
-                 'altitude': 20,
+                 'altitude': 25,
                  'uBody': 25,
                  'heading': 199,
                  'glideslope': 0,
                  'roll': 0,
-                 'prop:/position/ref-heading': HEADING,
+                 'prop:/fdm/jsbsim/positioning/ref-heading': HEADING,
                  }
 
 ugv.arguments = {'aircraft': 'ground-vehicle',
-                 # 'airport': 'KBOS',
-                 'prop:/position/ref-origin-lat': ORIGIN_FG[0],
-                 'prop:/position/ref-origin-lon': ORIGIN_FG[1],
-                 # 'runway': '22R',
+                 'prop:/fdm/jsbsim/positioning/ref-origin-lat': ORIGIN_FG[0],
+                 'prop:/fdm/jsbsim/positioning/ref-origin-lon': ORIGIN_FG[1],
+                 'prop:/fdm/jsbsim/positioning/ref-heading': HEADING,
                  'lat': UGV_START[0], 'lon': UGV_START[1],
                  'heading': 199,
-                 # 'altitude': 0,
                  }
 # -------------------- MAIN CLASS -------------------------
 
@@ -107,7 +105,7 @@ ugv.arguments = {'aircraft': 'ground-vehicle',
 class MainSimulation(object):
     UAV_FILE = './logs/Rascal.csv'
     UGV_FILE = './logs/ground-vehilce.csv'
-    ap_mode = 'HOLD'
+    ap_mode = 'HOLD' # Initial autopilot mode
     uav_state = []
     ugv_state = []
     final_stage = False
@@ -166,17 +164,20 @@ class MainSimulation(object):
         deltav = (self.uav_state[3]*math.sin(self.uav_state[6])
                   - self.ugv_state[2]*math.sin(self.ugv_state[4]))
 
-        v_uav, v_ugv = self.PID.get_control(deltax, deltay, deltav)
+        v_uav, v_ugv, heading_uav, heading_ugv = self.PID.get_control(deltax, deltay, deltav)
 
         uav_ctrl.setpoint['velocity'] = max(min(28.0, v_uav), 18.0)     # [m/s]
         ugv_ctrl.setpoint['velocity'] = max(min(30.0, v_ugv), 0) # [m/s]
 
+        uav_ctrl.setpoint['heading'] = max(min(5, heading_uav), -5)
+        ugv_ctrl.setpoint['heading'] = max(min(5, heading_ugv), -5)
 
-        # Switch to landing mode after certain point
+        # Switch to final stage of landing after certain point.
         # Change condition inside parenthesis. 
+        # Possibly switch mode after this point. 
         if (abs(deltax) < 10):
-            uav_.landing_mode()
-            ugv_.landing_mode()
+            #uav_.landing_mode()
+            #ugv_.landing_mode()
             self.final_stage = True
 
 
@@ -196,10 +197,8 @@ class MainSimulation(object):
     def get_state(self):
         """ Send command to control system of vehicle. """
         # UAV = [0=x, 1=y, 2=h-agl-ft, 3=vt-fps, 4=udot-ft_sec2, 5=gamma-rad, 6=psi-gt-rad]
-        # uav = uav_ctrl.get_state([13, 14, 10, 1, 2, 3, 4, 0])
         uav = uav_ctrl.get_state([1, 2, 3, 4, 5, 6, 7, 8, 0])
         # UAV = [0=x, 1=y, 2=vt-fps, 3=udot-ft_sec2, 4=psi-gt-rad, 5=h-agl-ft]
-        # ugv = ugv_ctrl.get_state([9, 10, 2, 3, 5, 6, 0])
         ugv = ugv_ctrl.get_state([1, 2, 4, 5, 6, 3, 0])
 
         # Aerial vehicle
@@ -252,6 +251,8 @@ class MyGui(SimulationGUI):
 
     def __init__(self, simulation, vehicles):
         SimulationGUI.__init__(self, vehicles)
+        self.sim = simulation
+        
         # Initial GUI setup
         for group in self.groups.values():
             for button in group.buttons():
@@ -264,7 +265,6 @@ class MyGui(SimulationGUI):
                 slider.setValue(
                     uav_ctrl.setpoint[str(slider.objectName()).lower()])
 
-        self.sim = simulation
         self.sim.send_command('both')
         # Start the control thread
         self.sim.start_control_thread()
