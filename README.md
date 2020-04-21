@@ -6,6 +6,26 @@ This repository shows how to implement an experimental setup environment for tes
   <img width="430" height="300" src="https://people.kth.se/~laperss/assets/images/fg_landing.png">
 </p>
 
+# Citing
+Main paper han be found [here](https://ieeexplore.ieee.org/abstract/document/8550247). 
+
+**Text citation**
+```
+L. Persson and B. Wahlberg, "Verification of Cooperative Maneuvers in FlightGear using MPC and Backwards Reachable Sets," 2018 European Control Conference (ECC), Limassol, 2018, pp. 1411-1416.
+```
+
+**BibTeX citation**
+```
+@inproceedings{persson2018verification,
+  title={Verification of cooperative maneuvers in flightgear using mpc and backwards reachable sets},
+  author={Persson, Linnea and Wahlberg, Bo},
+  booktitle={2018 European Control Conference (ECC)},
+  pages={1411--1416},
+  year={2018},
+  organization={IEEE}
+}
+```
+
 ## Before you start
 * Update the path to JSBSim in `./flightgear/run_flightgear.sh`
 * Copy the protocols to the Flightgear/Protocols folder
