@@ -6,6 +6,13 @@ This repository shows how to implement an experimental setup environment for tes
   <img width="430" height="300" src="https://people.kth.se/~laperss/assets/images/fg_landing.png">
 </p>
 
+## Before you start
+* Update the path to JSBSim in `./flightgear/run_flightgear.sh`
+* Copy the protocols to the Flightgear/Protocols folder
+
+## Run the simulations
+* An example simulation is run using the script `start_uav_ugv_sim.py`. Note that Python 3 has to be used. This should open a control GUI, from where FlightGear can be started with the `Start` button. 
+
 ## Dataplotter
 The script ```fgpython/datamonitor.py``` is used to show the live data being written in the files found in the "logs" folder. 
 
