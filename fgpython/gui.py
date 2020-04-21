@@ -33,10 +33,22 @@ def run_fg_script(script, vehicle):
                             stderr=subprocess.PIPE, preexec_fn=os.setsid)
     return proc
 
+
+# Vehicle class
+class Vehicle(object):
+    id_counter = 0
+    path = None
+
+    def __init__(self, name, type_):
+        self.name = name
+        self.id = type_ + str(self.id_counter)
+        self.type = type_
+        self.running = False
+
+
+
 # MAIN PROGRAM
 # ---------------------------------------------------------------------------------
-
-
 class SimulationGUI(QtGui.QWidget):
     """ Base GUI class for sending commands to the JSBSim/FlightGear
         landing simulation. """

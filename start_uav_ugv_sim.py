@@ -16,95 +16,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tempfile
 from PyQt5 import QtGui, QtCore
-from fgpython import SimulationGUI, FGTelnetConnection, FGSocketConnection
+from fgpython import SimulationGUI, FGSocketConnection, Vehicle
 #from control import MPC, Positioner
 from control import Positioner, ControllerPID
+# Import the configuration file
+import config as cfg
 
 # MAIN PROGRAM PARAMETERS
 # ----------------------------------------------------------
-ORIGIN_FG = (42.37824878120545, -71.00457885362507)
-HEADING = 199.67
-POSITIONER = Positioner(ORIGIN_FG, HEADING)
-UAV_START = POSITIONER.get_global_position(-70, 5)
-UGV_START = POSITIONER.get_global_position(10, 0)
 FEET2M = 0.3048
 
-# The path to the FlightGear folder
-PATH = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(PATH, 'flightgear/run_flightgear.sh')
+
+# Update initial setpoints
+cfg.uav.control.setpoint['altitude'] = 25
+cfg.uav.control.setpoint['velocity'] = 20
+cfg.ugv.control.setpoint['velocity'] = 23
 
 
-
-
-# Socket connection for control
-FGSocketConnection.heading = HEADING
-ugv_ctrl = FGSocketConnection(5526, 5525, 'InputProtocol', 'UGVProtocol')
-uav_ctrl = FGSocketConnection(5515, 5514, 'InputProtocol', 'UAVProtocol')
-uav_ctrl.setpoint['altitude'] = 25
-
-
-# Vehicle class
-class Vehicle(object):
-    id_counter = 0
-    path = SCRIPT
-
-    def __init__(self, name, type_):
-        self.name = name
-        self.id = type_ + str(self.id_counter)
-        self.type = type_
-        self.running = False
-
-
-uav = Vehicle("Aerial Vehicle", "uav")
-ugv = Vehicle("Ground Vehicle", "ugv")
-
-ugv.control_variables = {'Velocity': {'range': (0, 35), 'value': 23},
-                         'Heading': {'range': (-180, 180), 'value': 0},
-                         'Acceleration': {'range': (-5, 5), 'value': 0}}
-
-uav.control_variables = {'Altitude': {'range': (0, 100), 'value': 18},
-                         'Velocity': {'range': (15, 35), 'value': 23},
-                         'Heading': {'range': (-180, 180), 'value': 0},
-                         'Acceleration': {'range': (-5, 5), 'value': 0},
-                         'Gamma': {'range': (-15, 15), 'value': 0}}
-
-# Telnet connection for commands
-uav.command = FGTelnetConnection('localhost', 6500)
-ugv.command = FGTelnetConnection('localhost', 6600)
-uav.control = uav_ctrl
-ugv.control = ugv_ctrl
-
-# Multiplayer ports
-uav.mp_output_port = 5002
-uav.mp_input_port = 5000
-ugv.mp_output_port = 5000
-ugv.mp_input_port = 5002
-
-uav.arguments = {'aircraft': 'Rascal110-JSBSim',
-                 'prop:/fdm/jsbsim/positioning/ref-origin-lat': ORIGIN_FG[0],
-                 'prop:/fdm/jsbsim/positioning/ref-origin-lon': ORIGIN_FG[1],
-                 'lat': UAV_START[0], 'lon': UAV_START[1],
-                 'altitude': 25,
-                 'uBody': 25,
-                 'heading': 199,
-                 'glideslope': 0,
-                 'roll': 0,
-                 'prop:/fdm/jsbsim/positioning/ref-heading': HEADING,
-                 }
-
-ugv.arguments = {'aircraft': 'ground-vehicle',
-                 'prop:/fdm/jsbsim/positioning/ref-origin-lat': ORIGIN_FG[0],
-                 'prop:/fdm/jsbsim/positioning/ref-origin-lon': ORIGIN_FG[1],
-                 'prop:/fdm/jsbsim/positioning/ref-heading': HEADING,
-                 'lat': UGV_START[0], 'lon': UGV_START[1],
-                 'heading': 199,
-                 }
 # -------------------- MAIN CLASS -------------------------
-
-
 class MainSimulation(object):
-    UAV_FILE = './logs/Rascal.csv'
-    UGV_FILE = './logs/ground-vehilce.csv'
     ap_mode = 'HOLD' # Initial autopilot mode
     uav_state = []
     ugv_state = []
@@ -147,10 +77,10 @@ class MainSimulation(object):
                  + [self.ugv_state[i] for i in [0, 1, 2, 3, 4]])
 
         # Current input
-        input_ = [uav_ctrl.setpoint['acceleration'],
-                  math.radians(uav_ctrl.setpoint['heading']),
-                  ugv_ctrl.setpoint['acceleration'],
-                  math.radians(ugv_ctrl.setpoint['heading'])]
+        input_ = [cfg.uav.control.setpoint['acceleration'],
+                  math.radians(cfg.uav.control.setpoint['heading']),
+                  cfg.ugv.control.setpoint['acceleration'],
+                  math.radians(cfg.ugv.control.setpoint['heading'])]
 
         self.compute_pid()
 
@@ -166,11 +96,11 @@ class MainSimulation(object):
 
         v_uav, v_ugv, heading_uav, heading_ugv = self.PID.get_control(deltax, deltay, deltav)
 
-        uav_ctrl.setpoint['velocity'] = max(min(28.0, v_uav), 18.0)     # [m/s]
-        ugv_ctrl.setpoint['velocity'] = max(min(30.0, v_ugv), 0) # [m/s]
+        cfg.uav.control.setpoint['velocity'] = max(min(28.0, v_uav), 18.0)     # [m/s]
+        cfg.ugv.control.setpoint['velocity'] = max(min(30.0, v_ugv), 0) # [m/s]
 
-        uav_ctrl.setpoint['heading'] = max(min(5, heading_uav), -5)
-        ugv_ctrl.setpoint['heading'] = max(min(5, heading_ugv), -5)
+        cfg.uav.control.setpoint['heading'] = max(min(5, heading_uav), -5)
+        cfg.ugv.control.setpoint['heading'] = max(min(5, heading_ugv), -5)
 
         # Switch to final stage of landing after certain point.
         # Change condition inside parenthesis. 
@@ -184,12 +114,12 @@ class MainSimulation(object):
     def send_command(self, vehicle):
         """ Send command to control system of vehicle. """
         if vehicle == 'both':
-            uav_ctrl.send_cmd()
-            ugv_ctrl.send_cmd()
+            cfg.uav.control.send_cmd()
+            cfg.ugv.control.send_cmd()
         elif vehicle == 'uav':
-            uav_ctrl.send_cmd()
+            cfg.uav.control.send_cmd()
         elif vehicle == 'ugv':
-            ugv_ctrl.send_cmd()
+            cfg.ugv.control.send_cmd()
         else:
             raise ValueError(
                 "Acceptable arguments are 'uav', 'ugv' or 'both'. ")
@@ -197,9 +127,9 @@ class MainSimulation(object):
     def get_state(self):
         """ Send command to control system of vehicle. """
         # UAV = [0=x, 1=y, 2=h-agl-ft, 3=vt-fps, 4=udot-ft_sec2, 5=gamma-rad, 6=psi-gt-rad]
-        uav = uav_ctrl.get_state([1, 2, 3, 4, 5, 6, 7, 8, 0])
+        uav = cfg.uav.control.get_state([1, 2, 3, 4, 5, 6, 7, 8, 0])
         # UAV = [0=x, 1=y, 2=vt-fps, 3=udot-ft_sec2, 4=psi-gt-rad, 5=h-agl-ft]
-        ugv = ugv_ctrl.get_state([1, 2, 4, 5, 6, 3, 0])
+        ugv = cfg.ugv.control.get_state([1, 2, 4, 5, 6, 3, 0])
 
         # Aerial vehicle
         uav[0] -= 0.5
@@ -207,11 +137,11 @@ class MainSimulation(object):
         uav[3] *= FEET2M  # velocity
         uav[4] *= FEET2M  # acceleration
         # uav[5] *= 1  # gamma [rad]
-        uav[6] += -math.radians(HEADING)  # psi [rad]
+        uav[6] += -math.radians(cfg.heading)  # psi [rad]
         # Ground vehicle
         ugv[2] *= FEET2M  # velocity
         ugv[3] *= FEET2M  # acceleration
-        ugv[4] += -math.radians(HEADING)  # psi [rad]
+        ugv[4] += -math.radians(cfg.heading)  # psi [rad]
         ugv[5] *= FEET2M  # h
 
         deltat = uav[-1] - ugv[-1]
@@ -219,7 +149,7 @@ class MainSimulation(object):
         # Approximate current acceleration, velocity and position
         if deltat > 0:  # UAV data is newer
             a = ugv[3]*(1-11.99*deltat) + 11.54*deltat * \
-                ugv_ctrl.setpoint['acceleration']
+                cfg.ugv.control.setpoint['acceleration']
             v = ugv[2] + deltat/2*(a + ugv[3])
             x = ugv[0] + deltat/2*(v + ugv[2])
             ugv[2] = v
@@ -227,7 +157,7 @@ class MainSimulation(object):
         else:  # UGV data is newer
             deltat *= -1
             a = uav[4]*(1-1.93*deltat) + 1.776*deltat * \
-                uav_ctrl.setpoint['acceleration']
+                cfg.uav.control.setpoint['acceleration']
             v = uav[3] + deltat/2*(a + uav[4])
             x = uav[0] + deltat/2*(v + uav[3])
             uav[3] = v
@@ -263,13 +193,13 @@ class MyGui(SimulationGUI):
             for prop in vehicle.control_variables.values():
                 slider = prop['slider']
                 slider.setValue(
-                    uav_ctrl.setpoint[str(slider.objectName()).lower()])
+                    cfg.uav.control.setpoint[str(slider.objectName()).lower()])
 
         self.sim.send_command('both')
         # Start the control thread
         self.sim.start_control_thread()
-        uav_ctrl.start_receive_state()
-        ugv_ctrl.start_receive_state()
+        cfg.uav.control.start_receive_state()
+        cfg.ugv.control.start_receive_state()
 
     def stop_control(self):
         self.sim.stop_control_thread()
@@ -278,7 +208,7 @@ class MyGui(SimulationGUI):
 # :::::::::::::::::: UPDATE DATA :::::::::::::::::::::::::::
 app = QtGui.QApplication(sys.argv)
 simulation = MainSimulation()
-gui = MyGui(simulation, [uav, ugv])
+gui = MyGui(simulation, [cfg.uav, cfg.ugv])
 gui.show()
 app.exec_()
 

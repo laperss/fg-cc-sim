@@ -28,6 +28,15 @@ DEG2RAD = 0.0174532925
 FEET2M = 0.3048
 M2FEET = 3.28084
 
+class CommunicationSetup(object):
+    """ Communication definition struct """
+    def __init__(self, input_protocol, output_protocol, input_port, output_port):
+        self.in_protocol = input_protocol
+        self.out_protocol = output_protocol
+        self.input_port = input_port
+        self.output_port = output_port
+
+
 
 class FGSocketConnection(object):
     """ JSBSim communication system. 
@@ -41,18 +50,18 @@ class FGSocketConnection(object):
     """
     heading = 199.67
 
-    def __init__(self, input_port, output_port, in_protocol='InProtocol', out_protocol='OutProtocol'):
+    def __init__(self, comm_setup):
         self.data = []
 
-        self.output_port = output_port
-        self.input_port = input_port
-        self.input_protocol = in_protocol
-        self.output_protocol = out_protocol
+        self.output_port = comm_setup.output_port
+        self.input_port = comm_setup.input_port
+        self.input_protocol = comm_setup.in_protocol
+        self.output_protocol = comm_setup.out_protocol
         self.update = False
 
         path = os.path.dirname(os.path.abspath(__file__))
-        output_script = os.path.join(path, '../flightgear/protocols/'+out_protocol+'.xml')
-        input_script = os.path.join(path, '../flightgear/protocols/'+in_protocol+'.xml')
+        output_script = os.path.join(path, '../flightgear/protocols/'+self.output_protocol+'.xml')
+        input_script = os.path.join(path, '../flightgear/protocols/'+self.input_protocol+'.xml')
         input_root = ET.parse(input_script).getroot()
         self.setpoint = dict()
         for chunk in input_root[0][0].findall('chunk'):
@@ -109,3 +118,7 @@ class FGSocketConnection(object):
                    self.setpoint['acceleration']*M2FEET,
                    math.radians(self.setpoint['gamma'])]
         self.send_command_udp(command, self.output_port)
+
+
+
+        
