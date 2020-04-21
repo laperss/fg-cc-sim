@@ -17,7 +17,7 @@ L. Persson and B. Wahlberg, "Verification of Cooperative Maneuvers in FlightGear
 **BibTeX citation**
 ```
 @inproceedings{persson2018verification,
-  title={Verification of cooperative maneuvers in flightgear using mpc and backwards reachable sets},
+  title={Verification of cooperative maneuvers in {FlightGear} using {MPC} and backwards reachable sets},
   author={Persson, Linnea and Wahlberg, Bo},
   booktitle={2018 European Control Conference (ECC)},
   pages={1411--1416},
