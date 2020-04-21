@@ -7,7 +7,7 @@ This repository shows how to implement an experimental setup environment for tes
 </p>
 
 # Citing
-Main paper han be found [here](https://ieeexplore.ieee.org/abstract/document/8550247). 
+If you find this work useful in your research, please cite the main paper which can be found [here](https://ieeexplore.ieee.org/abstract/document/8550247). 
 
 **Text citation**
 ```
