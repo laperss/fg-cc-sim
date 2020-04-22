@@ -231,6 +231,12 @@ class FGTelnetConnection:
         self.control_altitude()
         self.control_heading()
 
+    def hold_mode(self):
+        """ Hold the set values """
+        self.control_velocity()
+        self.control_altitude()
+        self.control_heading()
+
     def view_next(self):
         """ Switch to the next view in FlightGear """
         if self.telnet:

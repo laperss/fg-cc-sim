@@ -35,7 +35,7 @@ cfg.ugv.control.setpoint['velocity'] = 23
 
 # -------------------- MAIN CLASS -------------------------
 class MainSimulation(object):
-    ap_mode = 'HOLD' # Initial autopilot mode
+    ap_mode = 'HOLD'  # Initial autopilot mode
     uav_state = []
     ugv_state = []
     final_stage = False
@@ -61,10 +61,12 @@ class MainSimulation(object):
         if not self.control:
             return
         self.next_call = max(self.next_call + self.ds, time.time())
-        if self.ap_mode != 'HOLD':
-            self.get_state()
-            self.calculate_control()
-        self.send_command('both')
+
+        if cfg.uav.control.connected and cfg.ugv.control.connected:
+            if self.ap_mode != 'HOLD':
+                self.get_state()
+                self.calculate_control()
+            self.send_command('both')
 
         threading.Timer(self.next_call - time.time(),
                         self.control_thread).start()
@@ -94,22 +96,24 @@ class MainSimulation(object):
         deltav = (self.uav_state[3]*math.sin(self.uav_state[6])
                   - self.ugv_state[2]*math.sin(self.ugv_state[4]))
 
-        v_uav, v_ugv, heading_uav, heading_ugv = self.PID.get_control(deltax, deltay, deltav)
+        v_uav, v_ugv, heading_uav, heading_ugv = self.PID.get_control(
+            deltax, deltay, deltav)
 
-        cfg.uav.control.setpoint['velocity'] = max(min(28.0, v_uav), 18.0)     # [m/s]
-        cfg.ugv.control.setpoint['velocity'] = max(min(30.0, v_ugv), 0) # [m/s]
+        cfg.uav.control.setpoint['velocity'] = max(
+            min(28.0, v_uav), 18.0)     # [m/s]
+        cfg.ugv.control.setpoint['velocity'] = max(
+            min(30.0, v_ugv), 0)  # [m/s]
 
         cfg.uav.control.setpoint['heading'] = max(min(5, heading_uav), -5)
         cfg.ugv.control.setpoint['heading'] = max(min(5, heading_ugv), -5)
 
         # Switch to final stage of landing after certain point.
-        # Change condition inside parenthesis. 
-        # Possibly switch mode after this point. 
+        # Change condition inside parenthesis.
+        # Possibly switch mode after this point.
         if (abs(deltax) < 10):
-            #uav_.landing_mode()
-            #ugv_.landing_mode()
+            # cfg.uav.command.landing_mode()
+            # cfg.uav.command.landing_mode()
             self.final_stage = True
-
 
     def send_command(self, vehicle):
         """ Send command to control system of vehicle. """
@@ -168,8 +172,8 @@ class MainSimulation(object):
 
         if uav[2] < 1.6:
             print("SUCCESSFUL LANDING")
-            uav_.pause()
-            ugv_.pause()
+            cfg.uav.command.pause()
+            cfg.ugv.command.pause()
             self.stop_control_thread()
 
 # -------------------- GUI CLASS -------------------------
@@ -180,22 +184,17 @@ class MyGui(SimulationGUI):
     ap_mode = 'HOLD'
 
     def __init__(self, simulation, vehicles):
-        SimulationGUI.__init__(self, vehicles)
         self.sim = simulation
-        
-        # Initial GUI setup
-        for group in self.groups.values():
-            for button in group.buttons():
-                if button.isChecked():
-                    button.click()
+        SimulationGUI.__init__(self, vehicles)
 
+        # Set sliders to initial values
         for vehicle in self.vehicles:
-            for prop in vehicle.control_variables.values():
-                slider = prop['slider']
+            for slider in self.sliders.values():
                 slider.setValue(
                     cfg.uav.control.setpoint[str(slider.objectName()).lower()])
 
         self.sim.send_command('both')
+
         # Start the control thread
         self.sim.start_control_thread()
         cfg.uav.control.start_receive_state()

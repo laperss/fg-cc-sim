@@ -21,21 +21,22 @@ import _thread
 import socket
 import re
 import xml.etree.ElementTree as ET
-import os 
+import os
 
 RAD2DEG = 57.2957795
 DEG2RAD = 0.0174532925
 FEET2M = 0.3048
 M2FEET = 3.28084
 
+
 class CommunicationSetup(object):
     """ Communication definition struct """
+
     def __init__(self, input_protocol, output_protocol, input_port, output_port):
         self.in_protocol = input_protocol
         self.out_protocol = output_protocol
         self.input_port = input_port
         self.output_port = output_port
-
 
 
 class FGSocketConnection(object):
@@ -58,10 +59,13 @@ class FGSocketConnection(object):
         self.input_protocol = comm_setup.in_protocol
         self.output_protocol = comm_setup.out_protocol
         self.update = False
+        self.connected = False
 
         path = os.path.dirname(os.path.abspath(__file__))
-        output_script = os.path.join(path, '../flightgear/protocols/'+self.output_protocol+'.xml')
-        input_script = os.path.join(path, '../flightgear/protocols/'+self.input_protocol+'.xml')
+        output_script = os.path.join(
+            path, '../flightgear/protocols/'+self.output_protocol+'.xml')
+        input_script = os.path.join(
+            path, '../flightgear/protocols/'+self.input_protocol+'.xml')
         input_root = ET.parse(input_script).getroot()
         self.setpoint = dict()
         for chunk in input_root[0][0].findall('chunk'):
@@ -98,6 +102,10 @@ class FGSocketConnection(object):
 
     def receive_state(self):
         """ Separates data and updates the "data" variable"""
+        if not self.connected:
+            data, addr = self.socket_in.recvfrom(2048)  # Wait for initial data
+            self.connected = True
+
         while self.update == True:
             data, addr = self.socket_in.recvfrom(2048)
             data = data.decode()
@@ -118,7 +126,3 @@ class FGSocketConnection(object):
                    self.setpoint['acceleration']*M2FEET,
                    math.radians(self.setpoint['gamma'])]
         self.send_command_udp(command, self.output_port)
-
-
-
-        
