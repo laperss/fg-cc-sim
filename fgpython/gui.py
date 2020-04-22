@@ -10,12 +10,6 @@ import pyqtgraph.exporters
 import pyqtgraph as pg
 
 
-RAD2DEG = 57.2957795
-DEG2RAD = 0.0174532925
-FEET2M = 0.3048
-M2FEET = 3.28084
-
-
 def run_fg_script(script, vehicle):
     """ Run a FlightGear startup script """
     command = [script]
@@ -153,18 +147,22 @@ class SimulationGUI(QtGui.QWidget):
             j += 1
             # One slider for every property
             for name, values in vehicle.control_variables.items():
-                slider = QtGui.QSlider(QtCore.Qt.Horizontal)
-                slider.setRange(*values['range'])
-                slider.setTickPosition(QtGui.QSlider.TicksBelow)
-                slider.setObjectName(name)
-                slider.id = vehicle.id
-                slider.valueChanged.connect(self.slider_moving)
-                slider.text = QtGui.QLabel('%s: 0.0' % name)
+                if vehicle.control.has_variable(name.lower()):
+                    slider = QtGui.QSlider(QtCore.Qt.Horizontal)
+                    slider.setRange(*values['range'])
+                    slider.setTickPosition(QtGui.QSlider.TicksBelow)
+                    slider.setObjectName(name)
+                    slider.id = vehicle.id
+                    slider.valueChanged.connect(self.slider_moving)
+                    slider.text = QtGui.QLabel('%s: 0.0' % name)
 
-                ctrl_settings_layout.addWidget(slider.text, j, 0, 1, 1)
-                ctrl_settings_layout.addWidget(slider, j, 1, 1, 3)
-                self.sliders[slider.id+'_'+name.lower()] = slider
-                j += 1
+                    ctrl_settings_layout.addWidget(slider.text, j, 0, 1, 1)
+                    ctrl_settings_layout.addWidget(slider, j, 1, 1, 3)
+                    self.sliders[slider.id+'_'+name.lower()] = slider
+                    j += 1
+                else:
+                    raise Warning(
+                        'Property "%s" is not set in the Protocol' % name)
 
         layout.addLayout(main_menu_layout, 0, 1, 2, 2)
         layout.addLayout(ctrl_settings_layout, 2, 1, 2, 2)
@@ -287,7 +285,7 @@ class SimulationGUI(QtGui.QWidget):
         """ Callback for mode button group. Changes the
             mode of the system. """
         mode = btn.objectName()
-        print("* Toggle flight mode: ", mode)
+        print("* Toggle flight mode:\t%s" % mode)
         self.ap_mode = mode.upper()
         self.sim.ap_mode = mode.upper()
 
@@ -314,8 +312,8 @@ class SimulationGUI(QtGui.QWidget):
 
     def toggle_ctrl(self, btn):
         """ Callback for control button group. Changes the control mode of the system. """
-        print("* Toggle control mode: ", end='')
         ctrl_mode = btn.objectName()
+        print("* Toggle control mode:\t%s" % ctrl_mode)
         for uav in [vehicle for vehicle in self.vehicles if vehicle.type == 'uav']:
             uav.command.toggle_tecs(ctrl_mode == 'TECS')
 

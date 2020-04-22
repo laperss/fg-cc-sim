@@ -85,6 +85,9 @@ class FGSocketConnection(object):
 
         self.setup_sockets()
 
+    def has_variable(self, prop):
+        return prop in self.id.keys()
+
     def update_bias(self, prop, bias):
         self.bias[self.id[prop]] = bias
 
