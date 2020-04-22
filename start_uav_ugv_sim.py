@@ -22,24 +22,21 @@ from control import Positioner, ControllerPID
 # Import the configuration file
 import config as cfg
 
-# MAIN PROGRAM PARAMETERS
-# ----------------------------------------------------------
-FEET2M = 0.3048
-
 
 # Update initial setpoints
-cfg.uav.control.setpoint['altitude'] = 25
-cfg.uav.control.setpoint['velocity'] = 20
-cfg.ugv.control.setpoint['velocity'] = 23
+cfg.uav.control.update_setpoint('altitude', 25.0)
+cfg.uav.control.update_setpoint('velocity', 20.0)
+cfg.ugv.control.update_setpoint('velocity', 23.0)
 
 
 # -------------------- MAIN CLASS -------------------------
+
 class MainSimulation(object):
     ap_mode = 'HOLD'  # Initial autopilot mode
     uav_state = []
     ugv_state = []
     final_stage = False
-    v_ref = 20.0
+    v_ref = cfg.v_ref
 
     def __init__(self):
         self.ds = 0.18
@@ -78,12 +75,6 @@ class MainSimulation(object):
         state = ([self.uav_state[i] for i in [0, 1, 3, 4, 6]]
                  + [self.ugv_state[i] for i in [0, 1, 2, 3, 4]])
 
-        # Current input
-        input_ = [cfg.uav.control.setpoint['acceleration'],
-                  math.radians(cfg.uav.control.setpoint['heading']),
-                  cfg.ugv.control.setpoint['acceleration'],
-                  math.radians(cfg.ugv.control.setpoint['heading'])]
-
         self.compute_pid()
 
     def compute_pid(self):
@@ -99,13 +90,15 @@ class MainSimulation(object):
         v_uav, v_ugv, heading_uav, heading_ugv = self.PID.get_control(
             deltax, deltay, deltav)
 
-        cfg.uav.control.setpoint['velocity'] = max(
-            min(28.0, v_uav), 18.0)     # [m/s]
-        cfg.ugv.control.setpoint['velocity'] = max(
-            min(30.0, v_ugv), 0)  # [m/s]
+        cfg.uav.control.update_setpoint(
+            'velocity', max(min(28.0, v_uav), 18.0))
+        cfg.ugv.control.update_setpoint(
+            'velocity', max(min(30.0, v_ugv), 0))
 
-        cfg.uav.control.setpoint['heading'] = max(min(5, heading_uav), -5)
-        cfg.ugv.control.setpoint['heading'] = max(min(5, heading_ugv), -5)
+        cfg.uav.control.update_setpoint(
+            'heading', max(min(5, heading_uav), -5))
+        cfg.ugv.control.update_setpoint(
+            'heading', max(min(5, heading_ugv), -5))
 
         # Switch to final stage of landing after certain point.
         # Change condition inside parenthesis.
@@ -137,23 +130,23 @@ class MainSimulation(object):
 
         # Aerial vehicle
         uav[0] -= 0.5
-        uav[2] *= FEET2M  # altitude
-        uav[3] *= FEET2M  # velocity
-        uav[4] *= FEET2M  # acceleration
+        uav[2] *= cfg.FEET2M  # altitude
+        uav[3] *= cfg.FEET2M  # velocity
+        uav[4] *= cfg.FEET2M  # acceleration
         # uav[5] *= 1  # gamma [rad]
         uav[6] += -math.radians(cfg.heading)  # psi [rad]
         # Ground vehicle
-        ugv[2] *= FEET2M  # velocity
-        ugv[3] *= FEET2M  # acceleration
+        ugv[2] *= cfg.FEET2M  # velocity
+        ugv[3] *= cfg.FEET2M  # acceleration
         ugv[4] += -math.radians(cfg.heading)  # psi [rad]
-        ugv[5] *= FEET2M  # h
+        ugv[5] *= cfg.FEET2M  # h
 
         deltat = uav[-1] - ugv[-1]
 
         # Approximate current acceleration, velocity and position
         if deltat > 0:  # UAV data is newer
             a = ugv[3]*(1-11.99*deltat) + 11.54*deltat * \
-                cfg.ugv.control.setpoint['acceleration']
+                cfg.ugv.control.get_setpoint('acceleration')
             v = ugv[2] + deltat/2*(a + ugv[3])
             x = ugv[0] + deltat/2*(v + ugv[2])
             ugv[2] = v
@@ -161,7 +154,7 @@ class MainSimulation(object):
         else:  # UGV data is newer
             deltat *= -1
             a = uav[4]*(1-1.93*deltat) + 1.776*deltat * \
-                cfg.uav.control.setpoint['acceleration']
+                cfg.uav.control.get_setpoint('acceleration')
             v = uav[3] + deltat/2*(a + uav[4])
             x = uav[0] + deltat/2*(v + uav[3])
             uav[3] = v
@@ -191,7 +184,7 @@ class MyGui(SimulationGUI):
         for vehicle in self.vehicles:
             for slider in self.sliders.values():
                 slider.setValue(
-                    cfg.uav.control.setpoint[str(slider.objectName()).lower()])
+                    cfg.uav.control.get_setpoint(str(slider.objectName()).lower()))
 
         self.sim.send_command('both')
 

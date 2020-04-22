@@ -10,6 +10,12 @@ import pyqtgraph.exporters
 import pyqtgraph as pg
 
 
+RAD2DEG = 57.2957795
+DEG2RAD = 0.0174532925
+FEET2M = 0.3048
+M2FEET = 3.28084
+
+
 def run_fg_script(script, vehicle):
     """ Run a FlightGear startup script """
     command = [script]
@@ -371,7 +377,7 @@ class SimulationGUI(QtGui.QWidget):
         # Get the correct vehicle from the ID
         vehicle, = [v for v in self.vehicles if v.id == id_]
         try:
-            vehicle.control.setpoint[prop.lower()] = value
+            vehicle.control.update_setpoint(prop.lower(), value)
         except:
             raise ValueError(
                 "ID given: %s. Acceptable IDs are 'uav' or 'ugv'." % id_)

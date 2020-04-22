@@ -4,11 +4,17 @@ from fgpython import comm, Vehicle, FGTelnetConnection, FGSocketConnection
 from control import Positioner
 
 # GLOBAL SETTINGS -----------------------------------------
+RAD2DEG = 57.2957795
+DEG2RAD = 0.0174532925
+FEET2M = 0.3048
+M2FEET = 3.28084
+
 # Set reference origin and heading
 origin = (42.37824878120545, -71.00457885362507)
 heading = 199.67
 positioner = Positioner(origin, heading)
 FGSocketConnection.heading = heading
+v_ref = 20.0  # Reference velocity
 
 # The path to the FlightGear folder
 PATH = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +57,7 @@ uav.arguments = {'aircraft': 'Rascal110-JSBSim',
                  'uBody': 25,
                  'heading': 199,
                  'glideslope': 0,
-                 'roll': 0 }
+                 'roll': 0}
 
 # VEHICLE 2 SETUP  ---------------------------------------
 ugv = Vehicle("Ground Vehicle", "ugv")
@@ -73,3 +79,17 @@ ugv.arguments = {'aircraft': 'ground-vehicle',
                  'prop:/fdm/jsbsim/positioning/ref-heading': heading,
                  'lat': ugv_initial[0], 'lon': ugv_initial[1],
                  'heading': 199}
+
+
+# Setup the correct scaling and offset for variables
+uav.control.update_scale('altitude', M2FEET)
+uav.control.update_scale('velocity', M2FEET)
+uav.control.update_scale('acceleration', M2FEET)
+uav.control.update_scale('heading', DEG2RAD)
+uav.control.update_bias('heading', heading)
+uav.control.update_scale('gamma', DEG2RAD)
+
+ugv.control.update_scale('velocity', M2FEET)
+ugv.control.update_scale('acceleration', M2FEET)
+ugv.control.update_scale('heading', DEG2RAD)
+ugv.control.update_bias('heading', heading)

@@ -12,8 +12,11 @@ Usage:
     uav_socket = FGSocketConnection(5515, 5514)
     ugv_socket = FGSocketConnection(5526, 5525)
 Set the reference values to send:
-    uav_socket.setpoint['acceleration'] = 0.3
-    ugv_socket.setpoint['heading'] = 12
+    uav_socket.update_setpoint('acceleration', 0.3)
+    ugv_socket.update_setpoint('heading', 12.0)
+Set the bias/scale values:
+    uav_socket.update_scale('acceleration', 3.28084)
+    ugv_socket.update_bias('heading', 120.0)
 """
 from __future__ import print_function
 import math
@@ -49,7 +52,7 @@ class FGSocketConnection(object):
         The protocol for sending data is: 
             * flightgear/protocols/InputProtocol.xml
     """
-    heading = 199.67
+    heading = 0.0
 
     def __init__(self, comm_setup):
         self.data = []
@@ -67,15 +70,32 @@ class FGSocketConnection(object):
         input_script = os.path.join(
             path, '../flightgear/protocols/'+self.input_protocol+'.xml')
         input_root = ET.parse(input_script).getroot()
-        self.setpoint = dict()
+        self.sp = []
+        self.scale = []
+        self.bias = []
+        self.id = dict()
+        itr = 0
         for chunk in input_root[0][0].findall('chunk'):
             name = chunk.find('name').text
-            self.setpoint[name] = 0.0
+            self.sp.append(0.0)
+            self.scale.append(1.0)
+            self.bias.append(0.0)
+            self.id[name] = itr
+            itr += 1
 
         self.setup_sockets()
 
-    def update_setpoint(prop, value, scale=1.0, bias=0.0):
-        self.setpoint[prop] = value*scale + bias
+    def update_bias(self, prop, bias):
+        self.bias[self.id[prop]] = bias
+
+    def update_scale(self, prop, scale):
+        self.scale[self.id[prop]] = scale
+
+    def update_setpoint(self, prop, value):
+        self.sp[self.id[prop]] = value
+
+    def get_setpoint(self, prop):
+        return self.sp[self.id[prop]]
 
     def setup_sockets(self):
         """ Setup the socket communication """
@@ -120,9 +140,6 @@ class FGSocketConnection(object):
 
     def send_cmd(self):
         """ Define the message and send to UDP function. """
-        command = [self.setpoint['altitude']*M2FEET,
-                   math.radians(self.setpoint['heading'] + self.heading),
-                   self.setpoint['velocity']*M2FEET,
-                   self.setpoint['acceleration']*M2FEET,
-                   math.radians(self.setpoint['gamma'])]
+        command = [self.scale[i]*(self.sp[i] + self.bias[i])
+                   for i in range(len(self.sp))]
         self.send_command_udp(command, self.output_port)
